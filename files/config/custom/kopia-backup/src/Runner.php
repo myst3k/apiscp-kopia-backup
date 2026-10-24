@@ -65,8 +65,7 @@ class Runner
 		$this->log("backup of {$this->domain} ({$this->site}) started");
 		try {
 			$this->ensureRepo();
-			// kopia.maintenance is stored unlocked, so the lock-renewal settings are reasserted every run
-			$this->kopia(['maintenance', 'set', '--extend-object-locks', 'true', '--full-interval', '24h', '--quick-interval', '4h']);
+			$this->applyPolicy();
 			$this->applyIgnores();
 			$this->report['databases'] = $this->dumpDatabases();
 			$this->dumpAcls();
@@ -222,17 +221,67 @@ class Runner
 			'--object-splitter', 'DYNAMIC-1M-BUZHASH',
 			'--description', gethostname() . ' ' . $this->domain,
 		]));
+		info('%s: repository created', $this->domain);
+		$this->log(sprintf('repository: created, %s lock %dd', $this->settings['lock_mode'], $this->settings['lock_days']));
+	}
+
+	/**
+	 * Retention and maintenance settings live in the repo; re-applied every run so changes on the admin
+	 * page reach existing repositories. Maintenance params are a manifest (inside locked blobs) and the
+	 * schedule blob kopia.maintenance is unlocked by design: losing it only makes maintenance run sooner.
+	 */
+	private function applyPolicy(): void
+	{
 		$this->kopia([
 			'policy', 'set', '--global',
-			'--keep-latest', '1', '--keep-hourly', '0', '--keep-daily', (string)$this->settings['keep_days'],
+			'--keep-latest', (string)$this->settings['keep_latest'], '--keep-hourly', '0', '--keep-daily', (string)$this->settings['keep_days'],
 			'--keep-weekly', '0', '--keep-monthly', '0', '--keep-annual', '0',
 			'--compression', 'zstd',
 			'--ignore-file-errors', 'true', '--ignore-dir-errors', 'true',
 		]);
 		// locks are renewed by full maintenance, which must run at least a day inside the lock period
 		$this->kopia(['maintenance', 'set', '--extend-object-locks', 'true', '--full-interval', '24h', '--quick-interval', '4h']);
-		info('%s: repository created', $this->domain);
-		$this->log(sprintf('repository: created, %s lock %dd, keep %d daily', $this->settings['lock_mode'], $this->settings['lock_days'], $this->settings['keep_days']));
+	}
+
+	/**
+	 * Maintenance state as Kopia reports it: lock extension on, and a full cycle within the last two days
+	 *
+	 * @return array{ok: bool, detail: string, extend_object_locks: ?bool, last_full: ?int}
+	 */
+	public function maintenanceCheck(): array
+	{
+		$ret = $this->kopia(['maintenance', 'info', '--json'], false);
+		$info = $ret['success'] ? json_decode($ret['stdout'], true) : null;
+		if (!is_array($info)) {
+			return ['ok' => false, 'detail' => 'maintenance info unavailable: ' . trim((string)$ret['stderr']), 'extend_object_locks' => null, 'last_full' => null];
+		}
+		$extend = (bool)($info['extendObjectLocks'] ?? false);
+		$lastFull = null;
+		foreach ((array)($info['schedule']['runs'] ?? []) as $task => $runs) {
+			if (!str_starts_with((string)$task, 'full-') && $task !== 'extend-blob-retention-time') {
+				continue;
+			}
+			foreach ((array)$runs as $run) {
+				if (!empty($run['success']) && !empty($run['end']) && ($t = strtotime($run['end']))) {
+					$lastFull = max($lastFull ?? 0, $t);
+				}
+			}
+		}
+		$stale = $lastFull === null || $lastFull < time() - 2 * 86400;
+		$problems = [];
+		if (!$extend) {
+			$problems[] = 'extend-object-locks is OFF';
+		}
+		if ($stale) {
+			$problems[] = 'no successful full maintenance in the last 2 days' . ($lastFull ? ' (last ' . date('Y-m-d H:i', $lastFull) . ')' : '');
+		}
+
+		return [
+			'ok'                  => !$problems,
+			'detail'              => $problems ? implode('; ', $problems) : 'extend-object-locks on, full maintenance ran ' . date('Y-m-d H:i', $lastFull),
+			'extend_object_locks' => $extend,
+			'last_full'           => $lastFull,
+		];
 	}
 
 	/**
@@ -255,7 +304,7 @@ class Runner
 		}
 		$this->kopia($args);
 		$this->report['ignores'] = array_values(array_unique($patterns));
-		$this->log('ignore rules: ' . count($this->report['ignores']) . ' patterns applied');
+		$this->log(sprintf('policy: keep %d daily + %d latest, extend-object-locks on; %d ignore patterns', $this->settings['keep_days'], $this->settings['keep_latest'], count($this->report['ignores'])));
 	}
 
 	/**
@@ -446,6 +495,9 @@ class Runner
 		$lines[] = 'snapshot integrity: ' . (!empty($report['integrity']['ok']) ? 'ok' : 'FAILED');
 		if (!empty($report['integrity']['output'])) {
 			$lines[] = $report['integrity']['output'];
+		}
+		if (isset($report['maintenance'])) {
+			$lines[] = 'maintenance: ' . (!empty($report['maintenance']['ok']) ? 'ok' : 'FAILED') . ' (' . $report['maintenance']['detail'] . ')';
 		}
 		if (!empty($report['locks'])) {
 			$l = $report['locks'];

@@ -8,7 +8,7 @@ use Page_Container;
 class Page extends Page_Container
 {
 	public const FIELDS = [
-		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days',
+		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days', 'keep_latest',
 		'kopia_version', 'parallel', 'verify_day', 'verify_percent', 'ignore',
 	];
 

@@ -72,6 +72,11 @@
 									<pre class="mb-0 mt-2">{{ $vd['integrity'] }}</pre>
 								@endif
 							</div>
+							@if (isset($vd['maintenance_ok']))
+								<div class="alert alert-{{ $vd['maintenance_ok'] ? 'success' : 'danger' }}">
+									<b>Lock renewal:</b> {{ $vd['maintenance'] }}
+								</div>
+							@endif
 							@if ($vd['locks'])
 								@php $l = $vd['locks']; $lockOk = !$l['unlocked'] && !$l['wrong_mode'] && !$l['short']; @endphp
 								<div class="alert alert-{{ $lockOk ? 'success' : 'danger' }}">
@@ -178,6 +183,7 @@
 				<dt class="col-sm-2">Verify</dt>
 				<dd class="col-sm-10">Two checks, both must pass.
 					<b>Integrity</b> is Kopia's own <code>kopia snapshot verify</code>: every object the snapshots reference must exist, and {{ (int)$s['verify_percent'] }}% of file contents is downloaded and re-hashed.
+					<b>Lock renewal</b> reads Kopia's maintenance state: lock extension must be on and a full maintenance cycle must have completed within two days.
 					<b>Locks</b> is ours, since Kopia cannot see lock state: the retention on a sample of the repository's objects is read back from the bucket and compared with the Retention settings.
 					Details are in Manage; the same pair runs weekly on the day set under Kopia.</dd>
 				<dt class="col-sm-2">Manage</dt>
@@ -275,9 +281,15 @@
 				<div class="form-group col-md-4">
 					<label for="keep_days">Keep daily snapshots (days)</label>
 					<input type="number" min="2" class="form-control" id="keep_days" name="keep_days" value="{{ $s['keep_days'] }}" required/>
+					<small class="form-text text-muted">One snapshot per calendar day is retained, the last of that day.</small>
+				</div>
+				<div class="form-group col-md-4">
+					<label for="keep_latest">Also keep the latest</label>
+					<input type="number" min="1" max="100" class="form-control" id="keep_latest" name="keep_latest" value="{{ $s['keep_latest'] }}" required/>
+					<small class="form-text text-muted">Most recent snapshots kept regardless of day, so extra runs on one day survive.</small>
 				</div>
 			</div>
-			<p class="text-muted">Lock settings apply to repositories when they are created; existing repositories keep theirs.</p>
+			<p class="text-muted">Lock mode and days are fixed when a repository is created. Keep settings are re-applied to every repository on each run.</p>
 		</div>
 
 		<div class="tab-pane" id="ignore" role="tabpanel">

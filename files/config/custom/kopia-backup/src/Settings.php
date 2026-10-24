@@ -18,6 +18,8 @@ class Settings
 		'lock_mode'  => 'COMPLIANCE',
 		'lock_days'  => 90,
 		'keep_days'  => 180,
+		// most recent snapshots kept regardless of day, so several runs in one day are not collapsed to one
+		'keep_latest' => 3,
 		// read by the Bootstrapper add-in: 'latest' or an exact version such as 0.21.1
 		'kopia_version' => 'latest',
 		// sites backed up at the same time by run-all and the nightly timer
@@ -229,6 +231,12 @@ class Settings
 			case 'keep_days':
 				if (!ctype_digit($value) || (int)$value < 2 || (int)$value > self::MAX_DAYS) {
 					return $fail('%s must be an integer between 2 and %d', $key, self::MAX_DAYS);
+				}
+
+				return (int)$value;
+			case 'keep_latest':
+				if (!ctype_digit($value) || (int)$value < 1 || (int)$value > 100) {
+					return $fail('keep_latest must be between 1 and 100');
 				}
 
 				return (int)$value;

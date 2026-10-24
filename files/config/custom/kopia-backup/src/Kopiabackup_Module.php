@@ -447,12 +447,17 @@ class Kopiabackup_Module extends \Module_Skeleton
 			$runner = new Runner($s, "site{$id}", $this->master());
 			$report['domain'] = $runner->domain();
 			$report['integrity'] = $runner->verify($percent ?? (int)$s['verify_percent']);
+			$report['maintenance'] = $runner->maintenanceCheck();
 		} catch (\Throwable $e) {
 			$report['integrity'] = ['ok' => false, 'output' => $e->getMessage()];
 		}
 		$locks = $this->verify_locks($site);
 		$report['locks'] = is_array($locks) ? $locks : null;
+		if (empty($report['maintenance']['ok'])) {
+			error('%s: maintenance: %s', $report['domain'] ?? $site, $report['maintenance']['detail'] ?? 'not checked');
+		}
 		$report['ok'] = !empty($report['integrity']['ok'])
+			&& !empty($report['maintenance']['ok'])
 			&& is_array($locks) && !$locks['unlocked'] && !$locks['wrong_mode'] && !$locks['short'];
 		$report['finished'] = time();
 		$report['log'] = Runner::writeVerifyLog("site{$id}", $report);
@@ -499,6 +504,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'verify_detail' => $st['verify'] ? [
 					'integrity_ok' => $st['verify']['integrity']['ok'] ?? null,
 					'integrity'    => $st['verify']['integrity']['output'] ?? null,
+					'maintenance_ok' => $st['verify']['maintenance']['ok'] ?? null,
+					'maintenance'    => $st['verify']['maintenance']['detail'] ?? null,
 					'locks'        => isset($st['verify']['locks']) ? array_intersect_key($st['verify']['locks'], array_flip(['objects', 'sampled', 'locked', 'exempt', 'unlocked', 'wrong_mode', 'short', 'mode', 'earliest_retain_until'])) : null,
 				] : null,
 				'duration'  => isset($st['finished'], $st['started']) ? $st['finished'] - $st['started'] : null,
