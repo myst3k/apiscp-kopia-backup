@@ -176,7 +176,10 @@
 				<dt class="col-sm-2">Back up now</dt>
 				<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
 				<dt class="col-sm-2">Verify</dt>
-				<dd class="col-sm-10">Checks that every object the snapshots reference still exists, re-downloads {{ (int)$s['verify_percent'] }}% of file contents to re-hash it, and reads the object-lock retention back from the bucket for a sample of objects.</dd>
+				<dd class="col-sm-10">Two checks, both must pass.
+					<b>Integrity</b> is Kopia's own <code>kopia snapshot verify</code>: every object the snapshots reference must exist, and {{ (int)$s['verify_percent'] }}% of file contents is downloaded and re-hashed.
+					<b>Locks</b> is ours, since Kopia cannot see lock state: the retention on a sample of the repository's objects is read back from the bucket and compared with the Retention settings.
+					Details are in Manage; the same pair runs weekly on the day set under Kopia.</dd>
 				<dt class="col-sm-2">Manage</dt>
 				<dd class="col-sm-10">Per-site ignore rules, the last error, and the reset action.</dd>
 			</dl>
