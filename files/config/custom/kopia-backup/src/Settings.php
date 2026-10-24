@@ -41,8 +41,12 @@ class Settings
 		'/var/www/*/wp-content/backwpup*',
 		'/var/www/*/wp-content/ai1wm-backups',
 		'/var/www/*/wp-content/backups-dup-lite',
+		'/var/www/*/wp-content/upgrade',
+		'/var/www/*/wp-content/upgrade-temp-backup',
+		'/var/www/*/wp-content/debug.log',
 		'/home/*/mysql_backups',
 		'/home/*/.cache',
+		'/home/*/.wp-cli/cache',
 	];
 
 	private const SECRETS = ['secret_key'];
