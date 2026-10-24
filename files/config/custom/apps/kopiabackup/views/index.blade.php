@@ -118,9 +118,14 @@
 					@endforeach
 				</tbody>
 			</table>
-			<p class="text-muted">Backups and verifications run in the background on the server; this table refreshes itself while they run.
-				Verify runs <code>kopia snapshot verify</code> (every object referenced by every snapshot must exist, {{ (int)$s['verify_percent'] }}% of file contents re-downloaded and hashed)
-				and reads the object-lock retention Wasabi reports on a sample of the repository.</p>
+			<dl class="row text-muted mb-0">
+				<dt class="col-sm-2">Back up now</dt>
+				<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
+				<dt class="col-sm-2">Verify</dt>
+				<dd class="col-sm-10">Checks that every object the snapshots reference still exists, re-downloads {{ (int)$s['verify_percent'] }}% of file contents to re-hash it, and reads the object-lock retention back from the bucket for a sample of objects.</dd>
+				<dt class="col-sm-2">Manage</dt>
+				<dd class="col-sm-10">Per-site ignore rules, the last error, and the reset action.</dd>
+			</dl>
 		</div>
 
 		<div class="tab-pane" id="storage" role="tabpanel">
