@@ -142,7 +142,9 @@ class BucketCheck
 			$exp = $rule['Expiration'] ?? [];
 			// expiring current versions would delete-marker live pack blobs and break the repo once locks lapse
 			if (isset($exp['Days']) || isset($exp['Date'])) {
-				return $this->result(self::FAIL, "rule `{$rule['ID']}' expires current versions; remove that action");
+				$id = $rule['ID'] ?? '(unnamed)';
+
+				return $this->result(self::FAIL, "rule `{$id}' expires current versions; remove that action");
 			}
 			$markers = $markers || !empty($exp['ExpiredObjectDeleteMarker']);
 			if (isset($rule['NoncurrentVersionExpiration']['NoncurrentDays'])) {

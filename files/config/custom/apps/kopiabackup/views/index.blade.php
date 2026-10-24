@@ -75,7 +75,7 @@
 
 	<div class="btn-group mb-4">
 		<button type="submit" name="save" value="1" class="btn btn-primary">Save</button>
-		<button type="submit" name="test" value="1" class="btn btn-secondary" formnovalidate>Test bucket</button>
+		<button type="submit" name="test" value="1" class="btn btn-secondary">Save &amp; test bucket</button>
 	</div>
 </form>
 

@@ -89,8 +89,9 @@
     block: |
       $templateClass->create_link('Kopia Backup', '/apps/kopiabackup', true, null, 'services');
 
+# ApisCP ships its own PHP; the system may have none
 - name: Lint installed PHP
-  command: php -l {{ item }}
+  command: "{{ apnscp_root }}/bin/php-bins/apnscp_php -l {{ item }}"
   loop:
     - "{{ apnscp_root }}/config/custom/boot.php"
     - "{{ apnscp_root }}/config/custom/templates/admin.php"

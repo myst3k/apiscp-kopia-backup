@@ -20,6 +20,15 @@ class Page extends Page_Container
 
 	protected ?array $testResults = null;
 
+	public function __construct()
+	{
+		parent::__construct();
+		// the menu only lists this app for admins, but the URL resolves for any login
+		if (!($this->getAuthContext()->level & PRIVILEGE_ADMIN)) {
+			fatal('Kopia Backup is restricted to the server administrator');
+		}
+	}
+
 	public function on_postback($params)
 	{
 		return $this->dispatchPostback($params);
@@ -39,8 +48,14 @@ class Page extends Page_Container
 		return success('Settings saved');
 	}
 
+	/**
+	 * Save, then test with what was saved so the result matches the form
+	 */
 	public function handleTest(array $params): bool
 	{
+		if (!$this->handleSave($params)) {
+			return false;
+		}
 		$this->testResults = $this->kopiabackup_test_bucket() ?: null;
 
 		return $this->testResults !== null;
