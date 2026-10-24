@@ -632,15 +632,18 @@ class Runner
 
 	private function chownToAdmin(string $root, string $leaf): void
 	{
-		$pwd = (new \Opcenter\Role\User())->getpwnam($this->adminUser());
-		if (empty($pwd['uid'])) {
-			return;
+		// site users live in the site's own passwd, not the host's; the home directory's owner is authoritative
+		$home = dirname($root);
+		$uid = (int)fileowner($home);
+		$gid = (int)filegroup($home);
+		if ($uid === 0) {
+			throw new \RuntimeException("cannot determine owner of {$home}");
 		}
 		// only the directories this restore created, not the restored content (which keeps its owners)
 		for ($dir = $leaf; str_starts_with($dir, $root); $dir = dirname($dir)) {
 			if (fileowner($dir) === 0) {
-				chown($dir, (int)$pwd['uid']);
-				chgrp($dir, (int)$pwd['gid']);
+				chown($dir, $uid);
+				chgrp($dir, $gid);
 			}
 			if ($dir === $root) {
 				break;
