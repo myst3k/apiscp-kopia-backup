@@ -140,8 +140,8 @@
 						<div class="col-md-6">
 							<h6>Database</h6>
 							<div class="form-group">
-								<label for="restore_db">Database</label>
-								<select class="form-control custom-select" id="restore_db" name="restore_db">
+								<label for="restore_db_name">Database</label>
+								<select class="form-control custom-select" id="restore_db_name" name="restore_db_name">
 									@foreach ($snapshots[0]['databases'] as $db)
 										<option value="{{ $db }}">{{ $db }}</option>
 									@endforeach

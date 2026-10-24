@@ -67,6 +67,12 @@ class Page extends Page_Container
 	 * Page_Container treats query-string parameters as a postback and accepts the CSRF cookie alone,
 	 * so a crafted link could change settings. Only act on a POST carrying the session token.
 	 */
+	/** names of submit buttons; every other posted key is a form field, never an action */
+	private const ACTIONS = [
+		'save', 'test', 'backup', 'backup_all', 'verify', 'verify_all', 'edit_ignores', 'save_site_ignores',
+		'show_log', 'reset', 'reveal', 'restore_files', 'restore_db', 'close_site',
+	];
+
 	public function on_postback($params)
 	{
 		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
@@ -84,7 +90,12 @@ class Page extends Page_Container
 		if (!empty($_POST['manage_site']) && empty($_POST['close_site'])) {
 			$this->editSite = (string)$_POST['manage_site'];
 		}
-		$this->dispatchPostback($_POST);
+		// dispatchPostback maps every posted key to handle<Key>(); only the pressed button may be one
+		$actions = array_intersect_key($_POST, array_flip(self::ACTIONS));
+		if (count($actions) > 1) {
+			return error('ambiguous request: %s', implode(', ', array_keys($actions)));
+		}
+		$this->dispatchPostback($actions, $_POST);
 
 		// Post/Redirect/Get, as core apps do: a browser refresh must not queue the job again.
 		// Messages and the page state the handlers produced ride along in the session for one request.
@@ -215,12 +226,20 @@ class Page extends Page_Container
 
 	public function handleRestoreFiles(array $params): bool
 	{
+		if (!$this->editSite) {
+			return error('no site selected');
+		}
+
 		return $this->kopiabackup_restore_files($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_path'] ?? ''));
 	}
 
 	public function handleRestoreDb(array $params): bool
 	{
-		return $this->kopiabackup_restore_db($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_db'] ?? ''), (string)($params['restore_mode'] ?? 'new'));
+		if (!$this->editSite) {
+			return error('no site selected');
+		}
+
+		return $this->kopiabackup_restore_db($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_db_name'] ?? ''), (string)($params['restore_mode'] ?? 'new'));
 	}
 
 	public function getSnapshots(string $domain): array
