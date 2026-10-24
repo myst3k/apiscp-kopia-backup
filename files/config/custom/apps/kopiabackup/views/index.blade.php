@@ -195,11 +195,12 @@
 					<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
 					<dt class="col-sm-2">Verify</dt>
 					<dd class="col-sm-10">
-						Three checks, all must pass. Also runs weekly on the day set under Kopia.
 						<ul class="mb-0 pl-3">
-							<li><b>Integrity</b>: Kopia's own <code>snapshot verify</code>. Every referenced object must exist; {{ (int)$s['verify_percent'] }}% of file contents is re-downloaded and hashed.</li>
-							<li><b>Lock renewal</b>: lock extension is on and full maintenance ran within two days.</li>
-							<li><b>Locks</b>: retention on a sample of objects, read back from the bucket, matches the Retention settings.</li>
+							<li>Runs <code>kopia snapshot verify</code>: every referenced object must exist</li>
+							<li>Re-downloads {{ (int)$s['verify_percent'] }}% of file contents and checks the hashes</li>
+							<li>Confirms lock extension is on and maintenance ran in the last two days</li>
+							<li>Reads retention back from the bucket on a sample of objects</li>
+							<li>Also runs weekly, on the day set under Kopia</li>
 						</ul>
 					</dd>
 					<dt class="col-sm-2">Manage</dt>
