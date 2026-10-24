@@ -18,6 +18,8 @@ class Settings
 		'lock_mode'  => 'COMPLIANCE',
 		'lock_days'  => 90,
 		'keep_days'  => 180,
+		// read by the Bootstrapper add-in: 'latest' upgrades Kopia on every run, 'hold' leaves the installed version
+		'kopia_updates' => 'latest',
 	];
 
 	private const SECRETS = ['secret_key'];
@@ -152,6 +154,13 @@ class Settings
 				$value = strtoupper($value);
 				if (!in_array($value, ['COMPLIANCE', 'GOVERNANCE'], true)) {
 					return $fail('lock_mode must be COMPLIANCE or GOVERNANCE');
+				}
+
+				return $value;
+			case 'kopia_updates':
+				$value = strtolower($value);
+				if (!in_array($value, ['latest', 'hold'], true)) {
+					return $fail('kopia_updates must be latest or hold');
 				}
 
 				return $value;

@@ -9,16 +9,33 @@ class Page extends Page_Container
 {
 	public const FIELDS = [
 		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days',
+		'kopia_updates',
 	];
 
+	public const GROUPS = [
+		'bucket' => [
+			'Bucket configuration',
+			'Fix these in Wasabi with an admin key. The backup key only reads them.',
+		],
+		'allow'  => [
+			'Permissions the key needs',
+			'A failure here means the policy is missing an action Kopia needs. Add it to the policy.',
+		],
+		'deny'   => [
+			'Permissions the key must not have',
+			'These operations are supposed to be refused. A failure means the key can do more than the generated policy allows: it is a root key, or the user has another policy attached.',
+		],
+	];
+
+	/** check => [group, label, what it means] */
 	public const CHECKS = [
-		'versioning'            => 'Versioning enabled',
-		'object_lock'           => 'Object lock enabled',
-		'default_retention'     => 'No default retention',
-		'lifecycle'             => 'Lifecycle rule',
-		'key_access'            => 'Key can read, list versions, delete',
-		'delete_version_denied' => 'Key denied DeleteObjectVersion',
-		'retention_locked'      => 'Key extends but cannot shorten or bypass locks',
+		'versioning'            => ['bucket', 'Versioning enabled', 'Object lock requires versioning; overwrites keep the old version.'],
+		'object_lock'           => ['bucket', 'Object lock enabled', 'Must be turned on when the bucket is created. Kopia locks each object it writes.'],
+		'default_retention'     => ['bucket', 'No default retention', 'Kopia sets its own retention. A bucket default would lock everything, including test probes.'],
+		'lifecycle'             => ['bucket', 'Lifecycle rule', 'Removes old versions after the lock expires. Must not expire current versions, and no overlapping rule may run shorter than lock + 1 days.'],
+		'key_access'            => ['allow', 'Read, list versions, delete', 'PutObject, GetObjectVersion, ListBucketVersions and DeleteObject: backups, maintenance and point-in-time recovery.'],
+		'delete_version_denied' => ['deny', 'Delete a specific version', 'Deleting a version destroys data permanently. Expected: AccessDenied.'],
+		'retention_locked'      => ['deny', 'Shorten or bypass a lock', 'Extending a lock must work (Kopia renews locks nightly). Shortening it or deleting the locked version with the bypass flag must be refused.'],
 	];
 
 	protected ?array $testResults = null;
@@ -41,8 +58,12 @@ class Page extends Page_Container
 		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 			return true;
 		}
-		$token = (string)($_POST[\Auth_UI::CSRF_KEY] ?? '');
-		if ($token === '' || !hash_equals((string)\Session::token(), $token)) {
+		// posted token preferred; the cookie (core's own criterion) is accepted so a rotated session token
+		// does not strand a form that was rendered before the rotation
+		$session = (string)\Session::token();
+		$posted = (string)($_POST[\Auth_UI::CSRF_KEY] ?? '');
+		$cookie = (string)($_COOKIE[\Auth_UI::CSRF_COOKIE] ?? '');
+		if ($session === '' || !(($posted !== '' && hash_equals($session, $posted)) || ($cookie !== '' && hash_equals($session, $cookie)))) {
 			return error('CSRF token mismatch; reload the page and try again');
 		}
 

@@ -65,6 +65,18 @@
 		</div>
 	</div>
 
+	<h4>Kopia</h4>
+	<div class="row">
+		<div class="form-group col-md-6">
+			<label for="kopia_updates">Updates</label>
+			<select class="form-control custom-select" id="kopia_updates" name="kopia_updates">
+				<option value="latest" {{ $s['kopia_updates'] === 'latest' ? 'selected' : '' }}>Install the latest release on every Bootstrapper run</option>
+				<option value="hold" {{ $s['kopia_updates'] === 'hold' ? 'selected' : '' }}>Hold the installed version{{ $version ? " ({$version})" : '' }}</option>
+			</select>
+			<small class="form-text text-muted">Applied the next time <code>upcp -b</code> or the add-in runs.</small>
+		</div>
+	</div>
+
 	<h4>Retention</h4>
 	<div class="row">
 		<div class="form-group col-md-4">
@@ -96,19 +108,43 @@
 </form>
 
 @if ($results)
+	@php
+		$failedGroups = [];
+		foreach ($Page::CHECKS as $key => [$group]) {
+			if (($results[$key]['status'] ?? 'skip') !== 'pass') {
+				$failedGroups[$group] = true;
+			}
+		}
+	@endphp
 	<h4>Bucket test: {{ $s['bucket'] }}</h4>
-	<table class="table table-sm table-responsive-md mb-4">
-		<tbody>
-			@foreach ($Page::CHECKS as $key => $label)
-				@php $r = $results[$key] ?? ['status' => 'skip', 'detail' => 'not run']; @endphp
-				<tr>
-					<td class="w-25">{{ $label }}</td>
-					<td><span class="badge badge-{{ $badge[$r['status']] ?? 'secondary' }} text-uppercase">{{ $r['status'] }}</span></td>
-					<td>{{ $r['detail'] }}</td>
-				</tr>
-			@endforeach
-		</tbody>
-	</table>
+	@if (!$failedGroups)
+		<div class="alert alert-success">All checks passed. The bucket is locked correctly and the key can run backups but cannot destroy them.</div>
+	@else
+		<div class="alert alert-danger">
+			<ul class="mb-0 pl-3">
+				@foreach ($failedGroups as $group => $_)
+					<li><b>{{ $Page::GROUPS[$group][0] }}:</b> {{ $Page::GROUPS[$group][1] }}</li>
+				@endforeach
+			</ul>
+		</div>
+	@endif
+	@foreach ($Page::GROUPS as $group => [$title, $explain])
+		<h5 class="mt-3">{{ $title }}</h5>
+		<p class="text-muted small">{{ $explain }}</p>
+		<table class="table table-sm table-responsive-md mb-3">
+			<tbody>
+				@foreach ($Page::CHECKS as $key => [$g, $label, $help])
+					@continue($g !== $group)
+					@php $r = $results[$key] ?? ['status' => 'skip', 'detail' => 'not run']; @endphp
+					<tr>
+						<td class="w-25">{{ $label }}<br/><small class="text-muted">{{ $help }}</small></td>
+						<td class="text-nowrap"><span class="badge badge-{{ $badge[$r['status']] ?? 'secondary' }} text-uppercase">{{ $r['status'] }}</span></td>
+						<td>{{ $r['detail'] }}</td>
+					</tr>
+				@endforeach
+			</tbody>
+		</table>
+	@endforeach
 @endif
 </div>
 
