@@ -45,150 +45,164 @@
 			<div id="kb-activity" class="alert alert-info {{ $jobs ? '' : 'd-none' }}">
 				Running: <span id="kb-activity-list">{{ implode(', ', array_map(static fn($j) => str_replace('-', ' ', $j), $jobs)) }}</span>
 			</div>
-			@if ($editSite)
-				<div class="card mb-3">
-					<div class="card-body">
-						@php $editStatus = current(array_filter($sites, static fn($x) => $x['domain'] === $editSite)) ?: null; @endphp
-						<h5 class="card-title">{{ $editSite }}</h5>
-						@if ($editStatus && $editStatus['ok'] === false && $editStatus['error'])
-							<div class="alert alert-danger">Last run failed: {{ $editStatus['error'] }}</div>
-						@endif
-						@if ($editStatus && $editStatus['finished'])
-							<table class="table table-sm w-auto">
-								<tbody>
-									<tr><th class="pr-4">Last run</th><td>{{ date('M j, Y H:i', $editStatus['finished']) }}, {{ \Formatter::time((int)$editStatus['duration']) }}</td></tr>
-									<tr><th class="pr-4">Files</th><td>{{ \Formatter::reduceBytes($editStatus['size']) }} across {{ $editStatus['databases'] }} database{{ $editStatus['databases'] === 1 ? '' : 's' }} and the site tree</td></tr>
-									<tr><th class="pr-4">Repository</th><td>{{ $editStatus['snapshots'] }} snapshots, {{ $editStatus['stored'] ? \Formatter::reduceBytes($editStatus['stored']) : '?' }} stored after dedup and compression</td></tr>
-									<tr><th class="pr-4">Runs</th><td>{{ $editStatus['runs'] }} since {{ $editStatus['first_run'] ? date('M j, Y', $editStatus['first_run']) : '?' }}, {{ $editStatus['failed_runs'] }} failed</td></tr>
-								</tbody>
-							</table>
-						@endif
-						@if ($editStatus && $editStatus['verify_detail'])
-							@php $vd = $editStatus['verify_detail']; @endphp
-							<h6>Last verification: {{ date('M j, Y H:i', $editStatus['verified']) }}</h6>
-							<div class="alert alert-{{ $vd['integrity_ok'] ? 'success' : 'danger' }}">
-								<b>Snapshot integrity:</b> {{ $vd['integrity_ok'] ? 'all referenced objects present, sampled contents match' : 'failed' }}
-								@if (!$vd['integrity_ok'] && $vd['integrity'])
-									<pre class="mb-0 mt-2">{{ $vd['integrity'] }}</pre>
-								@endif
-							</div>
-							@if (isset($vd['maintenance_ok']))
-								<div class="alert alert-{{ $vd['maintenance_ok'] ? 'success' : 'danger' }}">
-									<b>Lock renewal:</b> {{ $vd['maintenance'] }}
-								</div>
-							@endif
-							@if ($vd['locks'])
-								@php $l = $vd['locks']; $lockOk = !$l['unlocked'] && !$l['wrong_mode'] && !$l['short']; @endphp
-								<div class="alert alert-{{ $lockOk ? 'success' : 'danger' }}">
-									<b>Object locks:</b> {{ $l['locked'] }} of {{ $l['sampled'] }} sampled data objects locked ({{ $l['objects'] }} in repository, {{ $l['exempt'] ?? 0 }} log/maintenance blobs exempt), mode {{ $l['mode'] ?? '?' }}, earliest expiry {{ $l['earliest_retain_until'] ?? '?' }}
-									@if (!$lockOk)
-										<ul class="mb-0 mt-2">
-											@foreach (['unlocked' => 'No lock', 'wrong_mode' => 'Wrong mode', 'short' => 'Lock too short'] as $k => $label)
-												@foreach ($l[$k] as $item)<li>{{ $label }}: {{ $item }}</li>@endforeach
-											@endforeach
-										</ul>
-									@endif
-								</div>
-							@else
-								<div class="alert alert-danger"><b>Object locks:</b> could not be read</div>
-							@endif
-						@endif
-						@php $logs = $Page->getLogs($editSite); $log = $Page->getLog($editSite); @endphp
-						@if ($logs)
-							<h6>Logs</h6>
-							<div class="form-inline mb-2">
-								<select class="form-control custom-select mr-2" name="log_name">
-									@foreach ($logs as $entry)
-										<option value="{{ $entry['name'] }}" {{ $log && $log['name'] === $entry['name'] ? 'selected' : '' }}>{{ $entry['name'] }} ({{ \KopiaBackup\Runner::human($entry['size']) }})</option>
-									@endforeach
-								</select>
-								<button type="submit" name="show_log" value="1" class="btn btn-secondary">Show</button>
-							</div>
-							@if ($log)
-								<pre class="border rounded p-2 mb-4" style="max-height: 24rem; overflow: auto">{{ $log['text'] }}</pre>
-							@endif
-						@endif
-						<h6>Ignore rules</h6>
-						<p class="text-muted">Added to the global list on the Ignore rules section. Gitignore syntax, relative to the site root, e.g. <code>/var/www/example.com/wp-content/uploads/videos</code>.</p>
-						<input type="hidden" name="site_ignore_domain" value="{{ $editSite }}"/>
-						<textarea class="form-control mb-2" name="site_ignore_text" rows="5">{{ $s['site_ignores'][$editSite] ?? '' }}</textarea>
-						<button type="submit" name="save_site_ignores" value="1" class="btn btn-primary">Save rules</button>
 
-						<h6 class="mt-4">Reset local state</h6>
-						<p class="text-muted">Forgets this site's Kopia connection, cache and reports on this server. Nothing in the bucket is deleted.
-							Use it after removing or replacing the site's repository in Wasabi; the next backup starts a fresh repository.</p>
-						<button type="submit" name="reset" value="{{ $editSite }}" class="btn btn-secondary warn"
-							data-prompt="Forget local backup state for {{ $editSite }}? Nothing in the bucket is deleted."
-							{{ $editStatus && ($editStatus['running'] || !$editStatus['finished']) ? 'disabled' : '' }}>Reset {{ $editSite }}</button>
+			@if ($editSite)
+				@php
+					$st = current(array_filter($sites, static fn($x) => $x['domain'] === $editSite)) ?: null;
+					$logs = $Page->getLogs($editSite);
+					$log = $Page->getLog($editSite);
+					$vd = $st['verify_detail'] ?? null;
+				@endphp
+				<input type="hidden" name="manage_site" value="{{ $editSite }}"/>
+				<div class="d-flex align-items-center mb-4">
+					<button type="submit" name="close_site" value="1" class="btn btn-secondary mr-3">&larr; All sites</button>
+					<h4 class="mb-0">{{ $editSite }}</h4>
+					<div class="ml-auto">
+						<button type="submit" name="backup" value="{{ $editSite }}" class="btn btn-primary" {{ !$st || $st['running'] ? 'disabled' : '' }}>Back up now</button>
+						<button type="submit" name="verify" value="{{ $editSite }}" class="btn btn-secondary" {{ !$st || $st['running'] || $st['verifying'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
 					</div>
 				</div>
+
+				@if ($st && $st['ok'] === false && $st['error'])
+					<div class="alert alert-danger">Last run failed: {{ $st['error'] }}</div>
+				@endif
+
+				<h5>Status</h5>
+				@if ($st && $st['finished'])
+					<table class="table table-sm w-auto mb-4">
+						<tbody>
+							<tr><th class="pr-4">Last backup</th><td>{{ date('M j, Y H:i', $st['finished']) }}, took {{ \Formatter::time((int)$st['duration']) }}</td></tr>
+							<tr><th class="pr-4">Files</th><td>{{ \Formatter::reduceBytes($st['size']) }} across the site tree and {{ $st['databases'] }} database{{ $st['databases'] === 1 ? '' : 's' }}</td></tr>
+							<tr><th class="pr-4">Repository</th><td>{{ $st['snapshots'] }} snapshot{{ $st['snapshots'] === 1 ? '' : 's' }} retained, {{ $st['stored'] ? \Formatter::reduceBytes($st['stored']) : '?' }} stored after dedup and compression</td></tr>
+							<tr><th class="pr-4">Runs</th><td>{{ $st['runs'] }} since {{ $st['first_run'] ? date('M j, Y', $st['first_run']) : '?' }}, {{ $st['failed_runs'] }} failed</td></tr>
+						</tbody>
+					</table>
+				@else
+					<p class="text-muted mb-4">Never backed up.</p>
+				@endif
+
+				@if ($vd)
+					<h5>Last verification <small class="text-muted">{{ date('M j, Y H:i', $st['verified']) }}</small></h5>
+					<div class="alert alert-{{ $vd['integrity_ok'] ? 'success' : 'danger' }}">
+						<b>Snapshot integrity:</b> {{ $vd['integrity_ok'] ? 'all referenced objects present, sampled contents match' : 'failed' }}
+						@if (!$vd['integrity_ok'] && $vd['integrity'])
+							<pre class="mb-0 mt-2">{{ $vd['integrity'] }}</pre>
+						@endif
+					</div>
+					@if (isset($vd['maintenance_ok']))
+						<div class="alert alert-{{ $vd['maintenance_ok'] ? 'success' : 'danger' }}"><b>Lock renewal:</b> {{ $vd['maintenance'] }}</div>
+					@endif
+					@if ($vd['locks'])
+						@php $l = $vd['locks']; $lockOk = !$l['unlocked'] && !$l['wrong_mode'] && !$l['short']; @endphp
+						<div class="alert alert-{{ $lockOk ? 'success' : 'danger' }} mb-4">
+							<b>Object locks:</b> {{ $l['locked'] }} of {{ $l['sampled'] }} sampled data objects locked ({{ $l['objects'] }} in repository, {{ $l['exempt'] ?? 0 }} log/maintenance blobs exempt), mode {{ $l['mode'] ?? '?' }}, earliest expiry {{ $l['earliest_retain_until'] ?? '?' }}
+							@if (!$lockOk)
+								<ul class="mb-0 mt-2">
+									@foreach (['unlocked' => 'No lock', 'wrong_mode' => 'Wrong mode', 'short' => 'Lock too short'] as $k => $label)
+										@foreach ($l[$k] as $item)<li>{{ $label }}: {{ $item }}</li>@endforeach
+									@endforeach
+								</ul>
+							@endif
+						</div>
+					@else
+						<div class="alert alert-danger mb-4"><b>Object locks:</b> could not be read</div>
+					@endif
+				@endif
+
+				@if ($logs)
+					<h5>Logs</h5>
+					<div class="form-inline mb-2">
+						<select class="form-control custom-select mr-2" name="log_name">
+							@foreach ($logs as $entry)
+								<option value="{{ $entry['name'] }}" {{ $log && $log['name'] === $entry['name'] ? 'selected' : '' }}>{{ $entry['name'] }} ({{ \KopiaBackup\Runner::human($entry['size']) }})</option>
+							@endforeach
+						</select>
+						<button type="submit" name="show_log" value="1" class="btn btn-secondary">Show</button>
+					</div>
+					@if ($log)
+						<pre class="border rounded p-2 mb-4" style="max-height: 24rem; overflow: auto">{{ $log['text'] }}</pre>
+					@endif
+				@endif
+
+				<h5>Ignore rules for this site</h5>
+				<p class="text-muted">Added to the global list on the Ignore rules section. Gitignore syntax, relative to the site root, e.g. <code>/var/www/example.com/wp-content/uploads/videos</code>.</p>
+				<textarea class="form-control mb-2" name="site_ignore_text" rows="5">{{ $s['site_ignores'][$editSite] ?? '' }}</textarea>
+				<button type="submit" name="save_site_ignores" value="1" class="btn btn-primary mb-4">Save rules</button>
+
+				<h5>Reset local state</h5>
+				<p class="text-muted">Forgets this site's Kopia connection, cache and reports on this server. Nothing in the bucket is deleted.
+					Use it after removing or replacing the site's repository in Wasabi; the next backup starts a fresh repository.</p>
+				<button type="submit" name="reset" value="{{ $editSite }}" class="btn btn-secondary warn"
+					data-prompt="Forget local backup state for {{ $editSite }}? Nothing in the bucket is deleted."
+					{{ !$st || $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Reset {{ $editSite }}</button>
+			@else
+				<div class="mb-3">
+					<button type="submit" name="backup_all" value="1" class="btn btn-primary" {{ $s['bucket'] ? '' : 'disabled' }}>Back up all sites</button>
+					<button type="submit" name="verify_all" value="1" class="btn btn-secondary" {{ $s['bucket'] ? '' : 'disabled' }}>Verify all sites</button>
+					<span class="text-muted ml-2">{{ (int)$s['parallel'] }} at a time</span>
+				</div>
+				@if (!$s['bucket'] || !$s['access_key'])
+					<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
+				@endif
+				<table class="table">
+					<thead>
+						<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Snapshots</th><th>Stored</th><th>Verified</th><th></th></tr>
+					</thead>
+					<tbody>
+						@foreach ($sites as $siteId => $st)
+							<tr data-site="{{ $siteId }}">
+								<td>{{ $st['domain'] }}</td>
+								<td class="kb-last">{{ $st['finished'] ? date('M j, Y H:i', $st['finished']) : 'never' }}</td>
+								<td class="kb-result">
+									@if ($st['running'])
+										<span class="badge badge-info">running{{ $st['started'] ? ' since ' . date('H:i', $st['started']) : '' }}</span>
+									@elseif ($st['ok'] === true)
+										<span class="badge badge-success">ok</span>
+									@elseif ($st['ok'] === 'interrupted')
+										<span class="badge badge-warning">interrupted</span>
+									@elseif ($st['ok'] === false)
+										<span class="badge badge-danger" title="{{ $st['error'] }}">failed</span>
+									@endif
+									@if ($st['verifying'])
+										<span class="badge badge-info">verifying</span>
+									@endif
+								</td>
+								<td class="kb-snapshots">
+									@if ($st['snapshots'] !== null)
+										{{ $st['snapshots'] }}<small class="text-muted"> since {{ date('M j', $st['oldest']) }}</small>
+									@endif
+								</td>
+								<td class="kb-stored">{{ $st['stored'] ? \Formatter::reduceBytes($st['stored']) : '' }}</td>
+								<td class="kb-verified">
+									@if ($st['verified'])
+										{{ date('M j', $st['verified']) }}
+										<span class="badge badge-{{ $st['verify_ok'] ? 'success' : 'danger' }}">{{ $st['verify_ok'] ? 'ok' : 'failed' }}</span>
+									@endif
+								</td>
+								<td class="text-right text-nowrap">
+									<button type="submit" name="backup" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
+										{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
+									<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
+										{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
+									<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Manage{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
+								</td>
+							</tr>
+						@endforeach
+					</tbody>
+				</table>
+				<dl class="row text-muted mb-0">
+					<dt class="col-sm-2">Back up now</dt>
+					<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
+					<dt class="col-sm-2">Verify</dt>
+					<dd class="col-sm-10">Three checks, all must pass.
+						<b>Integrity</b> is Kopia's own <code>kopia snapshot verify</code>: every object the snapshots reference must exist, and {{ (int)$s['verify_percent'] }}% of file contents is downloaded and re-hashed.
+						<b>Lock renewal</b> reads Kopia's maintenance state: lock extension must be on and a full maintenance cycle must have completed within two days.
+						<b>Locks</b> is ours, since Kopia cannot see lock state: the retention on a sample of the repository's objects is read back from the bucket and compared with the Retention settings.
+						Details are under Manage; the same checks run weekly on the day set under Kopia.</dd>
+					<dt class="col-sm-2">Manage</dt>
+					<dd class="col-sm-10">Everything about one site: status, verification detail, logs, its own ignore rules, and reset.</dd>
+				</dl>
 			@endif
-			@if (!$s['bucket'] || !$s['access_key'])
-				<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
-			@endif
-			<div class="mb-3">
-				<button type="submit" name="backup_all" value="1" class="btn btn-primary" {{ $s['bucket'] ? '' : 'disabled' }}>Back up all sites</button>
-				<button type="submit" name="verify_all" value="1" class="btn btn-secondary" {{ $s['bucket'] ? '' : 'disabled' }}>Verify all sites</button>
-				<span class="text-muted ml-2">{{ (int)$s['parallel'] }} at a time, queued as one job</span>
-			</div>
-			<table class="table">
-				<thead>
-					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Snapshots</th><th>Stored</th><th>Verified</th><th></th></tr>
-				</thead>
-				<tbody>
-					@foreach ($sites as $siteId => $st)
-						<tr data-site="{{ $siteId }}">
-							<td>{{ $st['domain'] }}</td>
-							<td class="kb-last">{{ $st['finished'] ? date('M j, Y H:i', $st['finished']) : 'never' }}</td>
-							<td class="kb-result">
-								@if ($st['running'])
-									<span class="badge badge-info">running{{ $st['started'] ? ' since ' . date('H:i', $st['started']) : '' }}</span>
-								@elseif ($st['ok'] === true)
-									<span class="badge badge-success">ok</span>
-								@elseif ($st['ok'] === 'interrupted')
-									<span class="badge badge-warning">interrupted</span>
-								@elseif ($st['ok'] === false)
-									<span class="badge badge-danger" title="{{ $st['error'] }}">failed</span>
-								@endif
-								@if ($st['verifying'])
-									<span class="badge badge-info">verifying</span>
-								@endif
-							</td>
-							<td class="kb-snapshots">
-								@if ($st['snapshots'] !== null)
-									{{ $st['snapshots'] }}<small class="text-muted"> since {{ date('M j', $st['oldest']) }}</small>
-								@endif
-							</td>
-							<td class="kb-stored">{{ $st['stored'] ? \Formatter::reduceBytes($st['stored']) : '' }}</td>
-							<td class="kb-verified">
-								@if ($st['verified'])
-									{{ date('M j', $st['verified']) }}
-									<span class="badge badge-{{ $st['verify_ok'] ? 'success' : 'danger' }}">{{ $st['verify_ok'] ? 'ok' : 'failed' }}</span>
-								@endif
-							</td>
-							<td class="text-right text-nowrap">
-								<button type="submit" name="backup" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
-									{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
-								<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
-									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
-								<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Manage{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
-							</td>
-						</tr>
-					@endforeach
-				</tbody>
-			</table>
-			<dl class="row text-muted mb-0">
-				<dt class="col-sm-2">Back up now</dt>
-				<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
-				<dt class="col-sm-2">Verify</dt>
-				<dd class="col-sm-10">Two checks, both must pass.
-					<b>Integrity</b> is Kopia's own <code>kopia snapshot verify</code>: every object the snapshots reference must exist, and {{ (int)$s['verify_percent'] }}% of file contents is downloaded and re-hashed.
-					<b>Lock renewal</b> reads Kopia's maintenance state: lock extension must be on and a full maintenance cycle must have completed within two days.
-					<b>Locks</b> is ours, since Kopia cannot see lock state: the retention on a sample of the repository's objects is read back from the bucket and compared with the Retention settings.
-					Details are in Manage; the same pair runs weekly on the day set under Kopia.</dd>
-				<dt class="col-sm-2">Manage</dt>
-				<dd class="col-sm-10">Per-site ignore rules, the last error, and the reset action.</dd>
-			</dl>
 		</div>
 
 		<div class="tab-pane" id="storage" role="tabpanel">

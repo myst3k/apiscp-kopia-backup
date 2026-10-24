@@ -81,6 +81,9 @@ class Page extends Page_Container
 			return error('CSRF token mismatch; reload the page and try again');
 		}
 
+		if (!empty($_POST['manage_site']) && empty($_POST['close_site'])) {
+			$this->editSite = (string)$_POST['manage_site'];
+		}
 		$this->dispatchPostback($_POST);
 
 		// Post/Redirect/Get, as core apps do: a browser refresh must not queue the job again.
@@ -169,7 +172,7 @@ class Page extends Page_Container
 
 	public function handleSaveSiteIgnores(array $params): bool
 	{
-		$domain = (string)($params['site_ignore_domain'] ?? '');
+		$domain = (string)($params['manage_site'] ?? '');
 		$map = (array)($this->getSettings()['site_ignores'] ?? []);
 		$map[$domain] = (string)($params['site_ignore_text'] ?? '');
 		if (!$this->kopiabackup_set_settings(['site_ignores' => $map])) {
@@ -185,7 +188,6 @@ class Page extends Page_Container
 
 	public function handleShowLog(array $params): bool
 	{
-		$this->editSite = (string)($params['site_ignore_domain'] ?? '');
 		$this->logName = (string)($params['log_name'] ?? '');
 
 		return true;
