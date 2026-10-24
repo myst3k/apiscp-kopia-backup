@@ -253,7 +253,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 			error('backup failed for: %s', implode(', ', $failed));
 		}
 		if ($s['verify_day'] !== 'never' && (int)date('w') === (int)$s['verify_day']) {
-			$out['verify'] = $this->pool($sites, 'kopiabackup:verify', (int)$s['parallel']);
+			$verifiable = array_keys(array_filter($out, static fn($r) => $r === 'ok'));
+			$out['verify'] = $this->pool($verifiable, 'kopiabackup:verify', (int)$s['parallel']);
 			if ($failed = array_keys($out['verify'], 'failed', true)) {
 				error('verification failed for: %s', implode(', ', $failed));
 			}
@@ -271,7 +272,14 @@ class Kopiabackup_Module extends \Module_Skeleton
 			return $this->query('kopiabackup_verify_all');
 		}
 		$s = Settings::load();
-		$out = $this->pool(Enumerate::active(), 'kopiabackup:verify', (int)$s['parallel']);
+		// nothing to verify until a site has a repository
+		$sites = array_values(array_filter(Enumerate::active(), static fn($site) => !empty(Runner::status($site)['finished'])));
+		if (!$sites) {
+			info('no site has been backed up yet');
+
+			return [];
+		}
+		$out = $this->pool($sites, 'kopiabackup:verify', (int)$s['parallel']);
 		if ($failed = array_keys($out, 'failed', true)) {
 			error('verification failed for: %s', implode(', ', $failed));
 		}
