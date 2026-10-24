@@ -95,6 +95,27 @@ class Page extends Page_Container
 		return $this->kopiabackup_schedule((string)$params['backup']);
 	}
 
+	protected ?array $kit = null;
+
+	/**
+	 * Show the recovery kit on this request only; it is never rendered unasked
+	 */
+	public function handleReveal(array $params): bool
+	{
+		$kit = $this->kopiabackup_recovery_kit();
+		if (!is_array($kit)) {
+			return false;
+		}
+		$this->kit = $kit;
+
+		return true;
+	}
+
+	public function getRecoveryKit(): ?array
+	{
+		return $this->kit;
+	}
+
 	public function getSites(): array
 	{
 		return (array)$this->kopiabackup_status();

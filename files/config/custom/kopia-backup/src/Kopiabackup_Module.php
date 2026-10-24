@@ -262,6 +262,51 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
+	 * Everything needed to read the repositories from another machine. Store it in a password manager.
+	 *
+	 * @return array{master: string, derivation: string, endpoint: string, region: string, bucket: string, prefix: string, example_domain: ?string, example_password: ?string}
+	 */
+	public function recovery_kit(): array
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_recovery_kit');
+		}
+		$s = Settings::load();
+		$master = $this->master();
+		$sites = Enumerate::active();
+		$domain = $sites ? (string)(new \Opcenter\SiteConfiguration($sites[0]))->getServiceValue('siteinfo', 'domain') : null;
+
+		return [
+			'master'           => $master,
+			'derivation'       => 'repository password = hex(HMAC-SHA256(key: master, message: domain))',
+			'endpoint'         => (string)$s['endpoint'],
+			'region'           => (string)$s['region'],
+			'bucket'           => (string)$s['bucket'],
+			'prefix'           => (string)$s['prefix'],
+			'example_domain'   => $domain,
+			'example_password' => $domain ? hash_hmac('sha256', $domain, $master) : null,
+		];
+	}
+
+	/**
+	 * Install a master secret from a recovery kit, e.g. on a rebuilt server. Refuses to overwrite one that exists.
+	 */
+	public function import_master(string $master): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_import_master', $master);
+		}
+		if (!preg_match('/^[0-9a-f]{64}$/', $master)) {
+			return error('master must be 64 hex characters');
+		}
+		if ($this->keyring_get(self::MASTER_KEY)) {
+			return error('a master secret already exists; remove it first with cpcmd keyring:forget %s', self::MASTER_KEY);
+		}
+
+		return $this->keyring_set(self::MASTER_KEY, $master);
+	}
+
+	/**
 	 * Master secret every repository password derives from. Created on first use.
 	 * Reveal with `cpcmd keyring:get kopiabackup.master` and store it in a password manager: without it
 	 * nothing in the bucket can be read.

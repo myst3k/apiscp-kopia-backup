@@ -10,7 +10,7 @@
 	<ul class="col-12 col-sm-4 col-lg-3 col-xl-2 mb-3 list-group float-left nav nav-pills" id="menu" role="tablist"
 	    aria-multiselectable="true">
 		<li class="nav-item block">
-			<a href="#sites" data-toggle="pill" class="nav-link active" data-parent="#menu" role="tab">Sites</a>
+			<a href="#sites" data-toggle="pill" class="nav-link {{ $Page->getRecoveryKit() ? '' : 'active' }}" data-parent="#menu" role="tab">Sites</a>
 		</li>
 		<li class="nav-item block">
 			<a href="#storage" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Storage</a>
@@ -24,6 +24,9 @@
 		<li class="nav-item block">
 			<a href="#setup" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Bucket setup</a>
 		</li>
+		<li class="nav-item block">
+			<a href="#recovery" data-toggle="pill" class="nav-link {{ $Page->getRecoveryKit() ? 'active' : '' }}" data-parent="#menu" role="tab">Recovery</a>
+		</li>
 		<li class="block mt-3 text-right">
 			<button type="submit" class="btn btn-primary" name="save" value="1">Save</button>
 		</li>
@@ -34,7 +37,7 @@
 	</ul>
 
 	<div class="col-12 col-sm-8 col-lg-9 col-xl-10 float-left tab-content">
-		<div class="tab-pane active" id="sites" role="tabpanel">
+		<div class="tab-pane {{ $Page->getRecoveryKit() ? '' : 'active' }}" id="sites" role="tabpanel">
 			@php $sites = $Page->getSites(); @endphp
 			@if (!$s['bucket'] || !$s['access_key'])
 				<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
@@ -189,8 +192,6 @@
 				<input type="checkbox" class="custom-control-input" id="timer_enabled" name="timer_enabled" value="1" {{ $Page->isTimerEnabled() ? 'checked' : '' }}/>
 				<label class="custom-control-label" for="timer_enabled">Nightly backup of every site at 02:30</label>
 			</div>
-			<p class="text-muted">Every repository password derives from one master secret in the keyring. Save it in a password manager:
-				<code>cpcmd keyring:get kopiabackup.master</code></p>
 		</div>
 
 		<div class="tab-pane" id="setup" role="tabpanel">
@@ -212,6 +213,39 @@
 
 				<h4>4. Verify</h4>
 				<p><b>Save &amp; test bucket</b> checks all of the above with the stored key.</p>
+			@endif
+		</div>
+
+		<div class="tab-pane {{ $Page->getRecoveryKit() ? 'active' : '' }}" id="recovery" role="tabpanel">
+			<p>Every repository password derives from one master secret kept in the ApisCP keyring. The S3 key can be replaced in Wasabi; the master cannot.
+				Store the kit below in a password manager. Without it nothing in the bucket can be read.</p>
+			@if (!$Page->getRecoveryKit())
+				<button type="submit" name="reveal" value="1" class="btn btn-secondary warn" data-prompt="Show the master secret on screen?">Show recovery kit</button>
+			@else
+				@php $kit = $Page->getRecoveryKit(); @endphp
+				<div class="alert alert-warning">Shown for this page view only. Copy it into 1Password now.</div>
+				<table class="table w-auto">
+					<tbody>
+						<tr><th class="pr-4">Master secret</th><td><code>{{ $kit['master'] }}</code></td></tr>
+						<tr><th class="pr-4">Password derivation</th><td>{{ $kit['derivation'] }}</td></tr>
+						<tr><th class="pr-4">Endpoint</th><td>{{ $kit['endpoint'] }}</td></tr>
+						<tr><th class="pr-4">Region</th><td>{{ $kit['region'] }}</td></tr>
+						<tr><th class="pr-4">Bucket</th><td>{{ $kit['bucket'] }}</td></tr>
+						<tr><th class="pr-4">Prefix</th><td>{{ $kit['prefix'] }}&lt;domain&gt;/</td></tr>
+					</tbody>
+				</table>
+				<h4>Read a site's repository from any machine</h4>
+				<p>Needs only <code>kopia</code> and an S3 key with read access. Example for {{ $kit['example_domain'] }}:</p>
+<pre>DOMAIN={{ $kit['example_domain'] }}
+MASTER={{ $kit['master'] }}
+export KOPIA_PASSWORD=$(printf %s "$DOMAIN" | openssl dgst -sha256 -hmac "$MASTER" | awk '{print $NF}')
+export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=...
+kopia repository connect s3 --bucket {{ $kit['bucket'] }} --endpoint {{ parse_url($kit['endpoint'], PHP_URL_HOST) }} --region {{ $kit['region'] }} --prefix {{ $kit['prefix'] }}$DOMAIN/
+kopia snapshot list
+kopia restore &lt;snapshot-id&gt; /root/restore/$DOMAIN</pre>
+				<p>Derived password for {{ $kit['example_domain'] }}, to check the formula: <code>{{ $kit['example_password'] }}</code></p>
+				<h4>Rebuilt server</h4>
+				<p>Install the add-in, enter the same Storage settings, then <code>cpcmd kopiabackup:import-master {{ $kit['master'] }}</code>. The next run reconnects to each existing repository.</p>
 			@endif
 		</div>
 	</div>

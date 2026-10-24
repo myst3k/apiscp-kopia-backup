@@ -72,6 +72,6 @@ Enter the settings on the admin page, then **Save & test bucket**. CLI equivalen
 - **Kopia** section: the nightly timer toggle (02:30, every active site, one at a time under `nice`/`ionice`).
 - CLI: `cpcmd kopiabackup:run smokinbearcigars.com`, `cpcmd kopiabackup:run-all`, `cpcmd kopiabackup:status`.
 
-Every repository password derives from one master secret created on first run and kept in the ApisCP keyring. Store it in a password manager: `cpcmd keyring:get kopiabackup.master`. Without it nothing in the bucket can be read.
+Every repository password derives from one master secret created on first run and kept in the ApisCP keyring. The **Recovery** section shows the full kit (master, derivation, bucket details, and the `kopia` commands to read a repo from any machine); store it in a password manager. Without the master nothing in the bucket can be read. On a rebuilt server: `cpcmd kopiabackup:import-master <master>`.
 
 Per-site state lives in `/var/lib/kopia-backup/<siteN>/` (Kopia config, SQL dumps, ACL dump, `last.json`, logs); cache in `/var/cache/kopia-backup/<siteN>/`. Both are root-only.
