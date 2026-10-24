@@ -201,7 +201,7 @@ class Settings
 					if ($line === '' || $line[0] === '#') {
 						continue;
 					}
-					if (!preg_match('!^[A-Za-z0-9_./*?\[\]!-]+$!', $line)) {
+					if (!preg_match('~^[A-Za-z0-9_./*?\[\]!-]+$~', $line)) {
 						return $fail("ignore pattern `%s' has unsupported characters", $line);
 					}
 					$lines[] = $line;
