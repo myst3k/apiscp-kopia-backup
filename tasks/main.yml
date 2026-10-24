@@ -1,0 +1,107 @@
+---
+- name: Import Kopia signing key
+  rpm_key:
+    key: https://kopia.io/signing-key
+    state: present
+
+- name: Add Kopia repository
+  yum_repository:
+    name: kopia
+    description: Kopia
+    baseurl: http://packages.kopia.io/rpm/stable/$basearch/
+    gpgcheck: yes
+    gpgkey: https://kopia.io/signing-key
+
+# kopia is a static binary with no deps; limiting repos keeps a broken third-party repo key from failing the run
+- name: Install latest Kopia
+  dnf:
+    name: kopia
+    state: latest
+    disablerepo: "*"
+    enablerepo: kopia
+
+- name: Create plugin directories
+  file:
+    path: "{{ apnscp_root }}/config/custom/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - kopia-backup/src
+    - apps/kopiabackup/views
+    - templates
+
+- name: Create root-only state directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /var/lib/kopia-backup
+    - /var/cache/kopia-backup
+
+- name: Install plugin code
+  copy:
+    src: "config/custom/{{ item }}/"
+    dest: "{{ apnscp_root }}/config/custom/{{ item }}/"
+    owner: root
+    group: root
+    mode: "0644"
+    directory_mode: "0755"
+  loop:
+    - kopia-backup/src
+    - apps/kopiabackup
+  notify: Restart apnscp (kopia-backup)
+
+# boot.php and admin.php may already hold other customizations, so append a managed block
+- name: Seed PHP hook files
+  copy:
+    dest: "{{ apnscp_root }}/config/custom/{{ item }}"
+    content: "<?php\n"
+    force: no
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - boot.php
+    - templates/admin.php
+
+- name: Register module in boot.php
+  blockinfile:
+    path: "{{ apnscp_root }}/config/custom/boot.php"
+    marker: "// {mark} kopia-backup"
+    block: |
+      \a23r::register([
+      	'KopiaBackup\\BucketCheck' => '@custom/kopia-backup/src/BucketCheck.php',
+      	'KopiaBackup\\Settings'    => '@custom/kopia-backup/src/Settings.php',
+      	'Kopiabackup_Module'       => '@custom/kopia-backup/src/Kopiabackup_Module.php',
+      ]);
+      \a23r::registerModule('kopiabackup', 'Kopiabackup_Module');
+  notify: Restart apnscp (kopia-backup)
+
+- name: Add admin menu link
+  blockinfile:
+    path: "{{ apnscp_root }}/config/custom/templates/admin.php"
+    marker: "// {mark} kopia-backup"
+    block: |
+      $templateClass->create_link('Kopia Backup', '/apps/kopiabackup', true, null, 'services');
+
+- name: Lint installed PHP
+  command: php -l {{ item }}
+  loop:
+    - "{{ apnscp_root }}/config/custom/boot.php"
+    - "{{ apnscp_root }}/config/custom/templates/admin.php"
+  changed_when: false
+
+# re-run this add-in on every upcp -b so Kopia stays current
+- name: Hook add-in into Bootstrapper installed stage
+  blockinfile:
+    path: "{{ playbook_dir }}/roles/custom/installed/tasks/main.yml"
+    create: yes
+    marker: "# {mark} kopia-backup"
+    block: |
+      - include_role:
+          name: "{{ playbook_dir }}/addins/kopia-backup"

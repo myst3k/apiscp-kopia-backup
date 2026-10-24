@@ -1,0 +1,8 @@
+---
+name: Kopia Backup
+tagline: >-
+  Per-site Kopia backups to an object-locked S3 bucket.
+help: >-
+  Create the bucket with object lock enabled and no default retention, add a lifecycle rule that expires
+  noncurrent versions after lock + 1 days and removes expired delete markers, and use a key that cannot
+  delete object versions. <b>Test bucket</b> verifies all of it with the stored key.

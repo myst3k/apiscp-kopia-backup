@@ -1,0 +1,5 @@
+---
+- name: Restart apnscp (kopia-backup)
+  systemd:
+    name: apnscp
+    state: restarted
