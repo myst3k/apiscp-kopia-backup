@@ -56,7 +56,7 @@ class BucketCheck
 	 */
 	public function verifyLocks(string $repoPrefix, string $expectMode, int $sample = 25): array
 	{
-		$out = ['prefix' => $repoPrefix, 'objects' => 0, 'sampled' => 0, 'locked' => 0, 'unlocked' => [], 'wrong_mode' => [], 'short' => [], 'earliest_retain_until' => null, 'mode' => null];
+		$out = ['prefix' => $repoPrefix, 'objects' => 0, 'sampled' => 0, 'locked' => 0, 'exempt' => 0, 'unlocked' => [], 'wrong_mode' => [], 'short' => [], 'earliest_retain_until' => null, 'mode' => null];
 		$objects = [];
 		$token = null;
 		do {
@@ -82,6 +82,13 @@ class BucketCheck
 
 		$earliest = null;
 		foreach ($pick as $o) {
+			// Kopia writes its uploaded CLI logs and the maintenance schedule blob without retention;
+			// neither is needed to restore data
+			$base = basename($o['Key']);
+			if (str_starts_with($base, '_log_') || $base === 'kopia.maintenance') {
+				$out['exempt']++;
+				continue;
+			}
 			$out['sampled']++;
 			try {
 				$r = $this->s3->getObjectRetention(['Bucket' => $this->bucket, 'Key' => $o['Key']])['Retention'] ?? null;

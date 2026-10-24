@@ -75,7 +75,7 @@
 							@if ($vd['locks'])
 								@php $l = $vd['locks']; $lockOk = !$l['unlocked'] && !$l['wrong_mode'] && !$l['short']; @endphp
 								<div class="alert alert-{{ $lockOk ? 'success' : 'danger' }}">
-									<b>Object locks:</b> {{ $l['locked'] }} of {{ $l['sampled'] }} sampled objects locked ({{ $l['objects'] }} in repository), mode {{ $l['mode'] ?? '?' }}, earliest expiry {{ $l['earliest_retain_until'] ?? '?' }}
+									<b>Object locks:</b> {{ $l['locked'] }} of {{ $l['sampled'] }} sampled data objects locked ({{ $l['objects'] }} in repository, {{ $l['exempt'] ?? 0 }} log/maintenance blobs exempt), mode {{ $l['mode'] ?? '?' }}, earliest expiry {{ $l['earliest_retain_until'] ?? '?' }}
 									@if (!$lockOk)
 										<ul class="mb-0 mt-2">
 											@foreach (['unlocked' => 'No lock', 'wrong_mode' => 'Wrong mode', 'short' => 'Lock too short'] as $k => $label)
@@ -86,6 +86,21 @@
 								</div>
 							@else
 								<div class="alert alert-danger"><b>Object locks:</b> could not be read</div>
+							@endif
+						@endif
+						@php $logs = $Page->getLogs($editSite); $log = $Page->getLog($editSite); @endphp
+						@if ($logs)
+							<h6>Logs</h6>
+							<div class="form-inline mb-2">
+								<select class="form-control custom-select mr-2" name="log_name">
+									@foreach ($logs as $entry)
+										<option value="{{ $entry['name'] }}" {{ $log && $log['name'] === $entry['name'] ? 'selected' : '' }}>{{ $entry['name'] }} ({{ \KopiaBackup\Runner::human($entry['size']) }})</option>
+									@endforeach
+								</select>
+								<button type="submit" name="show_log" value="1" class="btn btn-secondary">Show</button>
+							</div>
+							@if ($log)
+								<pre class="border rounded p-2 mb-4" style="max-height: 24rem; overflow: auto">{{ $log['text'] }}</pre>
 							@endif
 						@endif
 						<h6>Ignore rules</h6>

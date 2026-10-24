@@ -18,6 +18,8 @@ class Runner
 	private string $cacheDir;
 	private array $env;
 	private array $report = [];
+	private ?string $logFile = null;
+	private const KEEP_LOGS = 60;
 
 	public function __construct(private array $settings, private string $site, string $master)
 	{
@@ -56,21 +58,34 @@ class Runner
 		}
 
 		$this->report = ['site' => $this->site, 'domain' => $this->domain, 'started' => time(), 'ok' => false];
+		$this->logFile = "{$this->stateDir}/logs/run-" . date('Ymd-His') . '.log';
+		$this->report['log'] = basename($this->logFile);
 		// running.json marks a run in progress; last.json keeps the previous result until this one finishes
 		file_put_contents("{$this->stateDir}/running.json", json_encode($this->report));
+		$this->log("backup of {$this->domain} ({$this->site}) started");
 		try {
 			$this->ensureRepo();
+			// kopia.maintenance is stored unlocked, so the lock-renewal settings are reasserted every run
+			$this->kopia(['maintenance', 'set', '--extend-object-locks', 'true', '--full-interval', '24h', '--quick-interval', '4h']);
 			$this->applyIgnores();
 			$this->report['databases'] = $this->dumpDatabases();
 			$this->dumpAcls();
 			$this->report['snapshots'] = $this->snapshot();
+			$t = microtime(true);
 			$this->kopia(['maintenance', 'run']);
+			$this->log(sprintf('maintenance run in %.1fs', microtime(true) - $t));
 			$this->report['repo'] = $this->repoStats();
+			if ($this->report['repo']) {
+				$this->log(sprintf('repository: %d snapshots, %s stored', $this->report['repo']['snapshots'] ?? 0, self::human($this->report['repo']['stored'] ?? 0)));
+			}
 			$this->report['ok'] = true;
+			$this->log('backup complete in ' . (time() - $this->report['started']) . 's');
 		} catch (\Throwable $e) {
 			$this->report['error'] = $e->getMessage();
+			$this->log('FAILED: ' . $e->getMessage());
 			throw $e;
 		} finally {
+			$this->pruneLogs();
 			$this->report['finished'] = time();
 			file_put_contents("{$this->stateDir}/last.json", json_encode($this->report, JSON_PRETTY_PRINT));
 			$this->bumpCounters($this->report['ok']);
@@ -175,6 +190,8 @@ class Runner
 	private function ensureRepo(bool $create = true): void
 	{
 		if (is_file("{$this->stateDir}/kopia.config") && $this->kopia(['repository', 'status'], false)['success']) {
+			$this->log('repository: connected');
+
 			return;
 		}
 		if (!$create) {
@@ -192,9 +209,11 @@ class Runner
 		// a repo may already exist in the bucket (reinstall, rebuilt server): reuse it rather than fail
 		if ($this->kopia(array_merge(['repository', 'connect'], $s3), false)['success']) {
 			info('%s: connected to existing repository', $this->domain);
+			$this->log('repository: connected to existing repository at ' . $this->settings['prefix'] . $this->domain . '/');
 
 			return;
 		}
+		$this->log('repository: none found, creating');
 
 		$this->kopia(array_merge(['repository', 'create'], $s3, [
 			'--retention-mode', (string)$this->settings['lock_mode'],
@@ -213,6 +232,7 @@ class Runner
 		// locks are renewed by full maintenance, which must run at least a day inside the lock period
 		$this->kopia(['maintenance', 'set', '--extend-object-locks', 'true', '--full-interval', '24h', '--quick-interval', '4h']);
 		info('%s: repository created', $this->domain);
+		$this->log(sprintf('repository: created, %s lock %dd, keep %d daily', $this->settings['lock_mode'], $this->settings['lock_days'], $this->settings['keep_days']));
 	}
 
 	/**
@@ -235,6 +255,7 @@ class Runner
 		}
 		$this->kopia($args);
 		$this->report['ignores'] = array_values(array_unique($patterns));
+		$this->log('ignore rules: ' . count($this->report['ignores']) . ' patterns applied');
 	}
 
 	/**
@@ -251,9 +272,13 @@ class Runner
 		array_splice($cmd, 1, 0, '--defaults-extra-file=%(cnf)s');
 		$cmd = implode(' ', $cmd) . ' --skip-dump-date -u root %(db)s > %(tmp)s';
 
+		if (!$dbs) {
+			$this->log('databases: none');
+		}
 		$done = [];
 		foreach ($dbs as $db) {
 			$out = "{$dir}/{$db}.sql";
+			$t = microtime(true);
 			$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'set -o pipefail; {$cmd}'", [
 				'cnf' => '/root/.my.cnf', 'db' => $db, 'tmp' => "{$out}.tmp",
 			]);
@@ -264,10 +289,12 @@ class Runner
 			chmod("{$out}.tmp", 0600);
 			rename("{$out}.tmp", $out);
 			$done[$db] = filesize($out) ?: 0;
+			$this->log(sprintf('database %s dumped: %s in %.1fs', $db, self::human($done[$db]), microtime(true) - $t));
 		}
 		foreach (glob("{$dir}/*.sql") ?: [] as $stale) {
 			if (!isset($done[basename($stale, '.sql')])) {
 				unlink($stale);
+				$this->log('database dump removed (database no longer exists): ' . basename($stale));
 			}
 		}
 
@@ -286,6 +313,9 @@ class Runner
 		$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'getfacl -R -p --skip-base %s > %s'", $www, "{$this->stateDir}/acl.txt");
 		if (!$ret['success']) {
 			warn('%s: getfacl failed: %s', $this->domain, trim($ret['stderr']));
+			$this->log('acl dump FAILED: ' . trim($ret['stderr']));
+		} else {
+			$this->log('acl dump: ' . self::human((int)@filesize("{$this->stateDir}/acl.txt")));
 		}
 	}
 
@@ -297,7 +327,9 @@ class Runner
 			"{$this->stateDir}/db",
 			"{$this->stateDir}/acl.txt",
 		], 'file_exists'));
+		$t = microtime(true);
 		$ret = $this->kopia(array_merge(['snapshot', 'create', '--json', '--parallel', '2'], $paths), true, true);
+		$elapsed = microtime(true) - $t;
 
 		$decoded = json_decode(trim($ret['stdout']), true);
 		$items = is_array($decoded) && isset($decoded['id']) ? [$decoded] : (array)$decoded;
@@ -318,6 +350,10 @@ class Runner
 				'failed' => $j['rootEntry']['summ']['numFailed'] ?? 0,
 			];
 		}
+		foreach ($out as $snap) {
+			$this->log(sprintf('snapshot %s: %s, %s files, %d errors (%s)', $snap['id'] ? substr($snap['id'], 0, 12) : '?', self::human((int)$snap['size']), number_format((int)$snap['files']), $snap['failed'], $snap['source']));
+		}
+		$this->log(sprintf('snapshot phase took %.1fs', $elapsed));
 
 		return $out;
 	}
@@ -330,11 +366,102 @@ class Runner
 			$args
 		);
 		$ret = (new \Util_Process_Safe())->setEnvironment($this->env)->run($cmd);
-		if (!$ret['success'] && $throw) {
-			throw new \RuntimeException("kopia {$args[0]} " . ($args[1] ?? '') . ': ' . trim($ret['stderr']));
+		if (!$ret['success']) {
+			$this->log("kopia {$args[0]} " . ($args[1] ?? '') . ' exited ' . $ret['return'] . ': ' . trim((string)$ret['stderr']));
+			if ($throw) {
+				throw new \RuntimeException("kopia {$args[0]} " . ($args[1] ?? '') . ': ' . trim($ret['stderr']));
+			}
 		}
 
 		return $ret;
+	}
+
+	private function log(string $line): void
+	{
+		if ($this->logFile) {
+			file_put_contents($this->logFile, '[' . date('Y-m-d H:i:s') . "] {$line}\n", FILE_APPEND);
+		}
+	}
+
+	private function pruneLogs(): void
+	{
+		$logs = glob("{$this->stateDir}/logs/run-*.log") ?: [];
+		rsort($logs);
+		foreach (array_slice($logs, self::KEEP_LOGS) as $old) {
+			@unlink($old);
+		}
+	}
+
+	public static function human(int $bytes): string
+	{
+		$units = ['B', 'KB', 'MB', 'GB', 'TB'];
+		$i = 0;
+		$n = (float)$bytes;
+		while ($n >= 1024 && $i < 4) {
+			$n /= 1024;
+			$i++;
+		}
+
+		return ($i ? number_format($n, 2) : (string)$bytes) . ' ' . $units[$i];
+	}
+
+	/**
+	 * Plugin-written logs for a site, newest first
+	 *
+	 * @return array<int, array{name: string, size: int, mtime: int}>
+	 */
+	public static function listLogs(string $site): array
+	{
+		$out = [];
+		foreach (glob(self::STATE_DIR . "/{$site}/logs/{run,verify}-*.log", GLOB_BRACE) ?: [] as $f) {
+			$out[] = ['name' => basename($f), 'size' => (int)filesize($f), 'mtime' => (int)filemtime($f)];
+		}
+		usort($out, static fn($a, $b) => strcmp($b['name'], $a['name']));
+
+		return $out;
+	}
+
+	public static function readLog(string $site, string $name, int $maxBytes = 262144): ?string
+	{
+		if (!preg_match('/^(run|verify)-\d{8}-\d{6}\.log$/', $name)) {
+			return null;
+		}
+		$f = self::STATE_DIR . "/{$site}/logs/{$name}";
+		if (!is_file($f)) {
+			return null;
+		}
+		$size = filesize($f);
+
+		return $size > $maxBytes ? "[... first " . self::human($size - $maxBytes) . " omitted ...]\n" . file_get_contents($f, false, null, $size - $maxBytes) : (string)file_get_contents($f);
+	}
+
+	public static function writeVerifyLog(string $site, array $report): ?string
+	{
+		$dir = self::STATE_DIR . "/{$site}/logs";
+		if (!is_dir($dir)) {
+			return null;
+		}
+		$name = 'verify-' . date('Ymd-His', $report['started']) . '.log';
+		$lines = ['[' . date('Y-m-d H:i:s', $report['started']) . "] verification of " . ($report['domain'] ?? $site) . ' started'];
+		$lines[] = 'snapshot integrity: ' . (!empty($report['integrity']['ok']) ? 'ok' : 'FAILED');
+		if (!empty($report['integrity']['output'])) {
+			$lines[] = $report['integrity']['output'];
+		}
+		if (!empty($report['locks'])) {
+			$l = $report['locks'];
+			$lines[] = sprintf('object locks: %d of %d sampled locked (%d objects), mode %s, earliest expiry %s', $l['locked'], $l['sampled'], $l['objects'], $l['mode'] ?? '?', $l['earliest_retain_until'] ?? '?');
+			foreach (['unlocked' => 'no lock', 'wrong_mode' => 'wrong mode', 'short' => 'too short'] as $k => $label) {
+				foreach ($l[$k] as $item) {
+					$lines[] = "  {$label}: {$item}";
+				}
+			}
+		} else {
+			$lines[] = 'object locks: could not be read';
+		}
+		$lines[] = '[' . date('Y-m-d H:i:s', $report['finished']) . '] verification ' . (!empty($report['ok']) ? 'passed' : 'FAILED');
+		file_put_contents("{$dir}/{$name}", implode("\n", $lines) . "\n");
+
+		return $name;
 	}
 
 	private function shadowPath(): string

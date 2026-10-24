@@ -167,7 +167,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if ($r['unlocked'] || $r['wrong_mode'] || $r['short']) {
 			error('%s: %d unlocked, %d wrong mode, %d shorter than %d days', $domain, count($r['unlocked']), count($r['wrong_mode']), count($r['short']), (int)$s['lock_days']);
 		} else {
-			info('%s: %d of %d objects sampled, all %s-locked through at least %s', $domain, $r['sampled'], $r['objects'], $r['mode'], $r['earliest_retain_until']);
+			info('%s: %d of %d objects sampled, all %s-locked through at least %s (%d log/maintenance blobs exempt)', $domain, $r['sampled'], $r['objects'], $r['mode'], $r['earliest_retain_until'], $r['exempt']);
 		}
 
 		return $r;
@@ -455,6 +455,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		$report['ok'] = !empty($report['integrity']['ok'])
 			&& is_array($locks) && !$locks['unlocked'] && !$locks['wrong_mode'] && !$locks['short'];
 		$report['finished'] = time();
+		$report['log'] = Runner::writeVerifyLog("site{$id}", $report);
 		Runner::saveVerify("site{$id}", $report);
 		if (!$report['ok']) {
 			error('%s: verification failed', $report['domain'] ?? $site);
@@ -498,7 +499,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'verify_detail' => $st['verify'] ? [
 					'integrity_ok' => $st['verify']['integrity']['ok'] ?? null,
 					'integrity'    => $st['verify']['integrity']['output'] ?? null,
-					'locks'        => isset($st['verify']['locks']) ? array_intersect_key($st['verify']['locks'], array_flip(['objects', 'sampled', 'locked', 'unlocked', 'wrong_mode', 'short', 'mode', 'earliest_retain_until'])) : null,
+					'locks'        => isset($st['verify']['locks']) ? array_intersect_key($st['verify']['locks'], array_flip(['objects', 'sampled', 'locked', 'exempt', 'unlocked', 'wrong_mode', 'short', 'mode', 'earliest_retain_until'])) : null,
 				] : null,
 				'duration'  => isset($st['finished'], $st['started']) ? $st['finished'] - $st['started'] : null,
 				'snapshots' => $st['repo']['snapshots'] ?? null,
@@ -511,6 +512,37 @@ class Kopiabackup_Module extends \Module_Skeleton
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Plugin-written run and verification logs for a site, newest first
+	 */
+	public function logs(string $site): array|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_logs', $site);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+
+		return Runner::listLogs("site{$id}");
+	}
+
+	/**
+	 * Contents of one log (tail of the last 256 KB for big ones)
+	 */
+	public function log(string $site, string $name): string|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_log', $site, $name);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$text = Runner::readLog("site{$id}", $name);
+
+		return $text ?? error("no log `%s' for %s", $name, $site);
 	}
 
 	public function timer_enabled(): bool

@@ -59,6 +59,7 @@ class Page extends Page_Container
 			$this->testResults = $flash['testResults'] ?? null;
 			$this->kit = $flash['kit'] ?? null;
 			$this->editSite = $flash['editSite'] ?? null;
+			$this->logName = $flash['logName'] ?? null;
 		}
 	}
 
@@ -89,6 +90,7 @@ class Page extends Page_Container
 			'testResults' => $this->testResults,
 			'kit'         => $this->kit,
 			'editSite'    => $this->editSite,
+			'logName'     => $this->logName,
 		]);
 		session_write_close();
 		header('Location: ' . \HTML_Kit::page_url_params(), true, 302);
@@ -177,6 +179,36 @@ class Page extends Page_Container
 		}
 
 		return success('Ignore rules saved for %s', $domain);
+	}
+
+	protected ?string $logName = null;
+
+	public function handleShowLog(array $params): bool
+	{
+		$this->editSite = (string)($params['site_ignore_domain'] ?? '');
+		$this->logName = (string)($params['log_name'] ?? '');
+
+		return true;
+	}
+
+	public function getLogs(string $domain): array
+	{
+		return (array)$this->kopiabackup_logs($domain);
+	}
+
+	/**
+	 * Selected log, or the newest one
+	 */
+	public function getLog(string $domain): ?array
+	{
+		$logs = $this->getLogs($domain);
+		if (!$logs) {
+			return null;
+		}
+		$name = $this->logName && in_array($this->logName, array_column($logs, 'name'), true) ? $this->logName : $logs[0]['name'];
+		$text = $this->kopiabackup_log($domain, $name);
+
+		return is_string($text) ? ['name' => $name, 'text' => $text] : null;
 	}
 
 	public function handleReset(array $params): bool
