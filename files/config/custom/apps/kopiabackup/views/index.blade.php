@@ -139,14 +139,14 @@
 	</table>
 	<div class="form-group col-md-4 px-0">
 		<label for="kopia_version">Version to install</label>
-		<input type="text" class="form-control" id="kopia_version" name="kopia_version" list="kopia-versions"
-		       value="{{ $s['kopia_version'] }}" pattern="latest|\d+\.\d+\.\d+" required/>
-		<datalist id="kopia-versions">
-			<option value="latest">latest</option>
-			@foreach ($kopia['available'] as $v)
-				<option value="{{ $v }}">{{ $v }}</option>
+		@php
+			$choices = array_values(array_unique(array_merge(['latest'], $kopia['available'], $s['kopia_version'] === 'latest' ? [] : [$s['kopia_version']])));
+		@endphp
+		<select class="form-control custom-select" id="kopia_version" name="kopia_version">
+			@foreach ($choices as $v)
+				<option value="{{ $v }}" {{ $s['kopia_version'] === $v ? 'selected' : '' }}>{{ $v === 'latest' ? 'latest' . ($kopia['latest'] ? " ({$kopia['latest']})" : '') : $v }}</option>
 			@endforeach
-		</datalist>
+		</select>
 		<small class="form-text text-muted">Applied on the next <code>upcp -b</code> or add-in run.</small>
 	</div>
 	<button type="submit" name="save" value="1" class="btn btn-primary">Save</button>
