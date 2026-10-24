@@ -132,7 +132,6 @@
 							<h6>Files</h6>
 							<div class="form-group">
 								<label for="restore_what">What</label>
-								@php $adminHome = 'home'; @endphp
 								<select class="form-control custom-select" id="restore_what" name="restore_what">
 									<option value="var/www">Web files (var/www)</option>
 									<option value="">Entire site</option>
