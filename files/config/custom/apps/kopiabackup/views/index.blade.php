@@ -45,11 +45,23 @@
 			@if ($editSite)
 				<div class="card mb-3">
 					<div class="card-body">
-						<h5 class="card-title">Ignore rules for {{ $editSite }}</h5>
+						@php $editStatus = current(array_filter($sites, static fn($x) => $x['domain'] === $editSite)) ?: null; @endphp
+						<h5 class="card-title">{{ $editSite }}</h5>
+						@if ($editStatus && $editStatus['ok'] === false && $editStatus['error'])
+							<div class="alert alert-danger">Last run failed: {{ $editStatus['error'] }}</div>
+						@endif
+						<h6>Ignore rules</h6>
 						<p class="text-muted">Added to the global list on the Ignore rules section. Gitignore syntax, relative to the site root, e.g. <code>/var/www/example.com/wp-content/uploads/videos</code>.</p>
 						<input type="hidden" name="site_ignore_domain" value="{{ $editSite }}"/>
 						<textarea class="form-control mb-2" name="site_ignore_text" rows="5">{{ $s['site_ignores'][$editSite] ?? '' }}</textarea>
 						<button type="submit" name="save_site_ignores" value="1" class="btn btn-primary">Save rules</button>
+
+						<h6 class="mt-4">Reset local state</h6>
+						<p class="text-muted">Forgets this site's Kopia connection, cache and reports on this server. Nothing in the bucket is deleted.
+							Use it after removing or replacing the site's repository in Wasabi; the next backup starts a fresh repository.</p>
+						<button type="submit" name="reset" value="{{ $editSite }}" class="btn btn-secondary warn"
+							data-prompt="Forget local backup state for {{ $editSite }}? Nothing in the bucket is deleted."
+							{{ $editStatus && ($editStatus['running'] || !$editStatus['finished']) ? 'disabled' : '' }}>Reset {{ $editSite }}</button>
 					</div>
 				</div>
 			@endif
@@ -92,10 +104,7 @@
 									{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
 								<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
 									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
-								<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Rules{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
-								<button type="submit" name="reset" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm warn"
-									data-prompt="Forget local backup state for {{ $st['domain'] }}? Nothing in the bucket is deleted. Use after removing or replacing its repository in Wasabi."
-									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Reset</button>
+								<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Manage{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
 							</td>
 						</tr>
 					@endforeach
@@ -203,7 +212,7 @@
 
 		<div class="tab-pane" id="ignore" role="tabpanel">
 			<p>Applied to every site on each run. Gitignore syntax, relative to the site root (<code>/var/www/...</code>, <code>/home/...</code>). Lines starting with <code>#</code> are comments.
-				Per-site additions are under <b>Rules</b> in the Sites table. Leave empty to restore the defaults.</p>
+				Per-site additions are under <b>Manage</b> in the Sites table. Leave empty to restore the defaults.</p>
 			<div class="form-group">
 				<textarea class="form-control" name="ignore" rows="12" spellcheck="false">{{ $s['ignore'] }}</textarea>
 			</div>

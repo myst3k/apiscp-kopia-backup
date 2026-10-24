@@ -64,14 +64,14 @@ Enter the settings on the admin page, then **Save & test bucket**. CLI equivalen
 
 - One Kopia repo per site at `<prefix><site>/`, created with splitter `DYNAMIC-1M-BUZHASH` so small scattered row changes re-upload less.
 - Databases: each of the site's MySQL databases is dumped nightly as uncompressed SQL with `mysqldump --single-transaction --quick --routines --triggers --events --skip-dump-date` into `/var/lib/kopia-backup/<site>/`. Kopia stores only changed chunks, so each night uploads the difference and every snapshot restores as a complete dump.
-- Files: the site's `shadow` and `info`, minus the ignore rules. The global list (**Ignore rules** section) defaults to temp files, logs, page caches, Wordfence logs, backup-plugin archives and ApisCP's own compressed `mysql_backups/`; each site can add its own under **Rules** in the Sites table. Rules are re-applied to the repo policy on every run.
+- Files: the site's `shadow` and `info`, minus the ignore rules. The global list (**Ignore rules** section) defaults to temp files, logs, page caches, Wordfence logs, backup-plugin archives and ApisCP's own compressed `mysql_backups/`; each site can add its own under **Manage** in the Sites table. Rules are re-applied to the repo policy on every run.
 
 ## Running backups
 
 - **Sites** section of the admin page: last run per site, **Back up now** per site, and **Back up all sites**, each queued as a panel job.
 - **Kopia** section: how many sites run at once (default 2) and the nightly timer toggle (02:30). Each site runs in its own `cpcmd` process under `nice`/`ionice`.
 - **Verify** per site or **Verify all sites**: `kopia snapshot verify` (every referenced object must exist; a configurable percentage of file contents is downloaded and re-hashed) plus a sample of object-lock retention read back from the bucket. Also runs weekly after the nightly backup on the configured day.
-- **Reset** per site forgets the local state (connection, cache, reports) without touching the bucket. Use it after deleting a repository in Wasabi; the next run creates a fresh one. Locked objects can only be deleted by the root account with bypass-governance in GOVERNANCE mode, and not at all in COMPLIANCE mode until they expire; in that case change the Prefix instead.
+- **Reset** (under a site's **Manage** panel) forgets the local state (connection, cache, reports) without touching the bucket. Use it after deleting a repository in Wasabi; the next run creates a fresh one. Locked objects can only be deleted by the root account with bypass-governance in GOVERNANCE mode, and not at all in COMPLIANCE mode until they expire; in that case change the Prefix instead.
 - CLI: `cpcmd kopiabackup:run <site>`, `run-all`, `verify <site>`, `verify-all`, `verify-locks <site>`, `reset <site>`, `status`.
 
 Every repository password derives from one master secret created on first run and kept in the ApisCP keyring. The **Recovery** section shows the full kit (master, derivation, bucket details, and the `kopia` commands to read a repo from any machine); store it in a password manager. Without the master nothing in the bucket can be read. On a rebuilt server: `cpcmd kopiabackup:import-master <master>`.

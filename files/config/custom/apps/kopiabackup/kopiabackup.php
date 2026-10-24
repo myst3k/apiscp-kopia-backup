@@ -54,6 +54,8 @@ class Page extends Page_Container
 			$flash = (array)\Session::get(self::FLASH);
 			\Session::forget(self::FLASH);
 			\Error_Reporter::merge_buffer((array)($flash['messages'] ?? []));
+			// the notification partial only renders for postbacks; this GET is the tail of one
+			$this->is_postback = true;
 			$this->testResults = $flash['testResults'] ?? null;
 			$this->kit = $flash['kit'] ?? null;
 			$this->editSite = $flash['editSite'] ?? null;

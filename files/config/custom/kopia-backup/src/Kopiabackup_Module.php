@@ -199,7 +199,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 			}
 		}
 
-		return info('%s: local backup state cleared; next run starts fresh', $site);
+		return success('%s: local backup state cleared; next run starts fresh', $site);
 	}
 
 	/**
@@ -386,7 +386,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		$job->setTags(['kopia-verify', $site]);
 		$job->dispatch();
 
-		return info('verification queued for %s', $site);
+		return success('verification queued for %s; progress shows in the job indicator', $site);
 	}
 
 	public function schedule_verify_all(): bool
@@ -396,7 +396,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		$job->setTags(['kopia-verify', 'all sites']);
 		$job->dispatch();
 
-		return info('verification of all sites queued');
+		return success('verification of all sites queued; progress shows in the job indicator');
 	}
 
 	/**
@@ -409,7 +409,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		$job->setTags(['kopia-backup', 'all sites']);
 		$job->dispatch();
 
-		return info('backup of all sites queued');
+		return success('backup of all sites queued; progress shows in the job indicator');
 	}
 
 	/**
@@ -425,7 +425,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		$job->setTags(['kopia-backup', $site]);
 		$job->dispatch();
 
-		return info('backup queued for %s', $site);
+		return success('backup queued for %s; progress shows in the job indicator', $site);
 	}
 
 	/**
@@ -487,7 +487,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 			return error('systemctl failed: %s', trim($ret['stderr']));
 		}
 
-		return info('nightly backup timer %s', $enabled ? 'enabled' : 'disabled');
+		return success('nightly backup timer %s', $enabled ? 'enabled' : 'disabled');
 	}
 
 	/**
