@@ -8,7 +8,7 @@
   yum_repository:
     name: kopia
     description: Kopia
-    baseurl: http://packages.kopia.io/rpm/stable/$basearch/
+    baseurl: https://packages.kopia.io/rpm/stable/$basearch/
     gpgcheck: yes
     gpgkey: https://kopia.io/signing-key
 
@@ -42,6 +42,15 @@
   loop:
     - /var/lib/kopia-backup
     - /var/cache/kopia-backup
+
+# fail before anything is replaced on a live panel
+- name: Lint plugin PHP before deploying
+  command: "{{ apnscp_root }}/bin/php-bins/apnscp_php -l {{ item }}"
+  with_fileglob:
+    - "{{ role_path }}/files/config/custom/kopia-backup/src/*.php"
+    - "{{ role_path }}/files/config/custom/apps/kopiabackup/*.php"
+    - "{{ role_path }}/files/config/custom/apps/kopiabackup/views/*.blade.php"
+  changed_when: false
 
 - name: Install plugin code
   copy:

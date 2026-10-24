@@ -2,6 +2,7 @@
 
 namespace apps\kopiabackup;
 
+use KopiaBackup\BucketCheck;
 use Page_Container;
 
 class Page extends Page_Container
@@ -15,8 +16,9 @@ class Page extends Page_Container
 		'object_lock'           => 'Object lock enabled',
 		'default_retention'     => 'No default retention',
 		'lifecycle'             => 'Lifecycle rule',
+		'key_access'            => 'Key can read, list versions, delete',
 		'delete_version_denied' => 'Key denied DeleteObjectVersion',
-		'bypass_governance_denied' => 'Key cannot delete locked versions',
+		'retention_locked'      => 'Key extends but cannot shorten or bypass locks',
 	];
 
 	protected ?array $testResults = null;
@@ -30,9 +32,21 @@ class Page extends Page_Container
 		}
 	}
 
+	/**
+	 * Page_Container treats query-string parameters as a postback and accepts the CSRF cookie alone,
+	 * so a crafted link could change settings. Only act on a POST carrying the session token.
+	 */
 	public function on_postback($params)
 	{
-		return $this->dispatchPostback($params);
+		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+			return true;
+		}
+		$token = (string)($_POST[\Auth_UI::CSRF_KEY] ?? '');
+		if ($token === '' || !hash_equals((string)\Session::token(), $token)) {
+			return error('CSRF token mismatch; reload the page and try again');
+		}
+
+		return $this->dispatchPostback($_POST);
 	}
 
 	public function handleSave(array $params): bool
@@ -57,9 +71,13 @@ class Page extends Page_Container
 		if (!$this->handleSave($params)) {
 			return false;
 		}
-		$this->testResults = $this->kopiabackup_test_bucket() ?: null;
+		$results = $this->kopiabackup_test_bucket();
+		if (!is_array($results)) {
+			return false;
+		}
+		$this->testResults = $results;
 
-		return $this->testResults !== null;
+		return BucketCheck::passed($results);
 	}
 
 	public function getSettings(): array
@@ -78,9 +96,9 @@ class Page extends Page_Container
 	}
 
 	/**
-	 * IAM policy for the backup key, scoped to the saved bucket
+	 * IAM policy for the backup key: bucket-level reads, and objects only under this server's prefix
 	 */
-	public function getKeyPolicy(string $bucket): string
+	public function getKeyPolicy(string $bucket, string $prefix): string
 	{
 		$arn = "arn:aws:s3:::{$bucket}";
 
@@ -104,7 +122,7 @@ class Page extends Page_Container
 						's3:AbortMultipartUpload', 's3:ListMultipartUploadParts',
 						's3:GetObjectRetention', 's3:PutObjectRetention',
 					],
-					'Resource' => "{$arn}/*",
+					'Resource' => "{$arn}/{$prefix}*",
 				],
 			],
 		]);
@@ -113,7 +131,7 @@ class Page extends Page_Container
 	public function getLifecycleRule(string $prefix, int $lockDays): string
 	{
 		return $this->json(['Rules' => [[
-			'ID'                             => 'kopia-cleanup',
+			'ID'                             => 'kopia-cleanup-' . rtrim(str_replace('/', '-', $prefix), '-'),
 			'Status'                         => 'Enabled',
 			'Filter'                         => ['Prefix' => $prefix],
 			'NoncurrentVersionExpiration'    => ['NoncurrentDays' => $lockDays + 1],

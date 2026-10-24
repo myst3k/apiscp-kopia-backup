@@ -59,7 +59,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
-	 * Verify bucket versioning, object lock, default retention, lifecycle and key restrictions
+	 * Verify bucket versioning, object lock, default retention, lifecycle and key permissions.
+	 * Raises an error when any check fails so cpcmd exits non-zero; the per-check detail is still returned.
 	 *
 	 * @return array|bool per-check status/detail
 	 */
@@ -73,15 +74,20 @@ class Kopiabackup_Module extends \Module_Skeleton
 			return error('missing settings: %s', implode(', ', $missing));
 		}
 
-		$results = (new BucketCheck(
-			$s['endpoint'], $s['region'], $s['bucket'], $s['prefix'],
-			$s['access_key'], $s['secret_key'], (int)$s['lock_days']
-		))->run();
+		try {
+			$results = (new BucketCheck(
+				$s['endpoint'], $s['region'], $s['bucket'], $s['prefix'],
+				$s['access_key'], $s['secret_key'], (int)$s['lock_days']
+			))->run();
+		} catch (\Throwable $e) {
+			return error('bucket check aborted: %s', $e->getMessage());
+		}
 
-		foreach ($results as $name => $r) {
-			if ($r['status'] === BucketCheck::FAIL) {
-				warn('%s: %s', $name, $r['detail']);
+		if ($failed = BucketCheck::failures($results)) {
+			foreach ($failed as $name) {
+				warn('%s: %s', $name, $results[$name]['detail']);
 			}
+			error('bucket verification failed: %s', implode(', ', $failed));
 		}
 
 		return $results;

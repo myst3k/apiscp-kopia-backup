@@ -31,6 +31,7 @@
 <div class="tab-content">
 <div class="tab-pane {{ $setupTab ? '' : 'active' }}" id="tab-settings" role="tabpanel">
 <form method="post">
+	<input type="hidden" name="{{ \Auth_UI::CSRF_KEY }}" value="{{ \Session::token() }}"/>
 	<h4>Storage</h4>
 	<div class="row">
 		<div class="form-group col-md-6">
@@ -123,11 +124,12 @@
 	<div class="position-relative mb-4">
 		<button type="button" class="btn btn-sm btn-secondary position-absolute" style="top:.5rem;right:.5rem"
 		        onclick="navigator.clipboard.writeText(document.getElementById('key-policy').textContent).then(()=>{this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
-		<pre class="p-3 border rounded bg-light"><code id="key-policy">{{ $Page->getKeyPolicy($s['bucket']) }}</code></pre>
+		<pre class="p-3 border rounded bg-light"><code id="key-policy">{{ $Page->getKeyPolicy($s['bucket'], (string)$s['prefix']) }}</code></pre>
 	</div>
 
 	<h4>3. Lifecycle rule</h4>
-	<p>Apply with an admin key, not the backup key. Noncurrent versions expire after lock + 1 days ({{ (int)$s['lock_days'] + 1 }}). Never add a rule that expires current versions.</p>
+	<p>Apply with an admin key, not the backup key. Noncurrent versions expire after lock + 1 days ({{ (int)$s['lock_days'] + 1 }}). Never add a rule that expires current versions.
+		<code>put-bucket-lifecycle-configuration</code> replaces every rule on the bucket; if the bucket already has rules, add this one to them instead.</p>
 	<div class="position-relative mb-4">
 		<button type="button" class="btn btn-sm btn-secondary position-absolute" style="top:.5rem;right:.5rem"
 		        onclick="navigator.clipboard.writeText(document.getElementById('lifecycle').textContent).then(()=>{this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
