@@ -25,9 +25,28 @@ class Settings
 		// weekly integrity + lock verification after the nightly run: day of week 0-6, or never
 		'verify_day'     => '0',
 		'verify_percent' => 2,
+		// newline-separated ignore patterns applied to every site; null means DEFAULT_IGNORES
+		'ignore'         => null,
+		// domain => newline-separated patterns added for that site only
+		'site_ignores'   => [],
+	];
+
+	// gitignore syntax, relative to the site's shadow root; the global list every site starts from
+	public const DEFAULT_IGNORES = [
+		'/tmp',
+		'/var/log',
+		'/var/www/*/wp-content/cache',
+		'/var/www/*/wp-content/wflogs',
+		'/var/www/*/wp-content/updraft',
+		'/var/www/*/wp-content/backwpup*',
+		'/var/www/*/wp-content/ai1wm-backups',
+		'/var/www/*/wp-content/backups-dup-lite',
+		'/home/*/mysql_backups',
+		'/home/*/.cache',
 	];
 
 	private const SECRETS = ['secret_key'];
+	private const LISTS = ['site_ignores'];
 	private const MAX_DAYS = 36500;
 
 	public static function path(): string
@@ -48,6 +67,7 @@ class Settings
 			$s[$k] = self::validate($k, $v, false) ?? self::DEFAULTS[$k];
 		}
 		$s['prefix'] ??= strtok(gethostname(), '.') . '/';
+		$s['ignore'] ??= implode("\n", self::DEFAULT_IGNORES);
 
 		return $s;
 	}
@@ -143,11 +163,44 @@ class Settings
 
 			return null;
 		};
+		if (in_array($key, self::LISTS, true)) {
+			if (!is_array($value)) {
+				return $fail('%s must be a map', $key);
+			}
+			$out = [];
+			foreach ($value as $domain => $patterns) {
+				if (!is_string($domain) || !preg_match('/^[a-z0-9.-]+$/i', $domain)) {
+					return $fail('%s: bad domain key', $key);
+				}
+				if (null === ($clean = self::validate('ignore', $patterns, $report))) {
+					return null;
+				}
+				if ($clean !== '') {
+					$out[$domain] = $clean;
+				}
+			}
+
+			return $out;
+		}
 		if (!is_scalar($value)) {
 			return $fail('%s must be a scalar', $key);
 		}
 		$value = trim((string)$value);
 		switch ($key) {
+			case 'ignore':
+				$lines = [];
+				foreach (preg_split('/\R/', $value) as $line) {
+					$line = trim($line);
+					if ($line === '' || $line[0] === '#') {
+						continue;
+					}
+					if (!preg_match('!^[A-Za-z0-9_./*?\[\]!-]+$!', $line)) {
+						return $fail("ignore pattern `%s' has unsupported characters", $line);
+					}
+					$lines[] = $line;
+				}
+
+				return implode("\n", array_values(array_unique($lines)));
 			case 'verify_day':
 				$value = strtolower($value);
 				if ($value !== 'never' && !preg_match('/^[0-6]$/', $value)) {

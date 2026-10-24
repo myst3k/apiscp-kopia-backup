@@ -64,7 +64,7 @@ Enter the settings on the admin page, then **Save & test bucket**. CLI equivalen
 
 - One Kopia repo per site at `<prefix><site>/`, created with splitter `DYNAMIC-1M-BUZHASH` so small scattered row changes re-upload less.
 - Databases: each of the site's MySQL databases is dumped nightly as uncompressed SQL with `mysqldump --single-transaction --quick --routines --triggers --events --skip-dump-date` into `/var/lib/kopia-backup/<site>/`. Kopia stores only changed chunks, so each night uploads the difference and every snapshot restores as a complete dump.
-- Files: the site's `shadow` and `info`. ApisCP's own compressed exports under `mysql_backups/` are excluded.
+- Files: the site's `shadow` and `info`, minus the ignore rules. The global list (**Ignore rules** section) defaults to temp files, logs, page caches, Wordfence logs, backup-plugin archives and ApisCP's own compressed `mysql_backups/`; each site can add its own under **Rules** in the Sites table. Rules are re-applied to the repo policy on every run.
 
 ## Running backups
 

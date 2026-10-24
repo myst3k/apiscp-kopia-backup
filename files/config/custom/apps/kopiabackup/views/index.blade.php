@@ -19,6 +19,9 @@
 			<a href="#retention" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Retention</a>
 		</li>
 		<li class="nav-item block">
+			<a href="#ignore" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Ignore rules</a>
+		</li>
+		<li class="nav-item block">
 			<a href="#kopia" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Kopia</a>
 		</li>
 		<li class="nav-item block">
@@ -38,7 +41,18 @@
 
 	<div class="col-12 col-sm-8 col-lg-9 col-xl-10 float-left tab-content">
 		<div class="tab-pane {{ $Page->getRecoveryKit() ? '' : 'active' }}" id="sites" role="tabpanel">
-			@php $sites = $Page->getSites(); @endphp
+			@php $sites = $Page->getSites(); $editSite = $Page->getEditSite(); @endphp
+			@if ($editSite)
+				<div class="card mb-3">
+					<div class="card-body">
+						<h5 class="card-title">Ignore rules for {{ $editSite }}</h5>
+						<p class="text-muted">Added to the global list on the Ignore rules section. Gitignore syntax, relative to the site root, e.g. <code>/var/www/example.com/wp-content/uploads/videos</code>.</p>
+						<input type="hidden" name="site_ignore_domain" value="{{ $editSite }}"/>
+						<textarea class="form-control mb-2" name="site_ignore_text" rows="5">{{ $s['site_ignores'][$editSite] ?? '' }}</textarea>
+						<button type="submit" name="save_site_ignores" value="1" class="btn btn-primary">Save rules</button>
+					</div>
+				</div>
+			@endif
 			@if (!$s['bucket'] || !$s['access_key'])
 				<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
 			@endif
@@ -78,6 +92,7 @@
 									{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
 								<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
 									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
+								<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Rules{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
 							</td>
 						</tr>
 					@endforeach
@@ -181,6 +196,15 @@
 				</div>
 			</div>
 			<p class="text-muted">Lock settings apply to repositories when they are created; existing repositories keep theirs.</p>
+		</div>
+
+		<div class="tab-pane" id="ignore" role="tabpanel">
+			<p>Applied to every site on each run. Gitignore syntax, relative to the site root (<code>/var/www/...</code>, <code>/home/...</code>). Lines starting with <code>#</code> are comments.
+				Per-site additions are under <b>Rules</b> in the Sites table. Leave empty to restore the defaults.</p>
+			<div class="form-group">
+				<textarea class="form-control" name="ignore" rows="12" spellcheck="false">{{ $s['ignore'] }}</textarea>
+			</div>
+			<p class="text-muted">Defaults skip temp files, logs, page caches, Wordfence logs, backup-plugin archives (UpdraftPlus, BackWPup, All-in-One, Duplicator) and ApisCP's own compressed database exports.</p>
 		</div>
 
 		<div class="tab-pane" id="kopia" role="tabpanel">

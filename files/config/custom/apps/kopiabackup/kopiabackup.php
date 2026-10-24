@@ -9,7 +9,7 @@ class Page extends Page_Container
 {
 	public const FIELDS = [
 		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days',
-		'kopia_version', 'parallel', 'verify_day', 'verify_percent',
+		'kopia_version', 'parallel', 'verify_day', 'verify_percent', 'ignore',
 	];
 
 	public const GROUPS = [
@@ -129,6 +129,34 @@ class Page extends Page_Container
 	public function handleVerifyAll(array $params): bool
 	{
 		return $this->kopiabackup_schedule_verify_all();
+	}
+
+	protected ?string $editSite = null;
+
+	public function handleEditIgnores(array $params): bool
+	{
+		$this->editSite = (string)$params['edit_ignores'];
+
+		return true;
+	}
+
+	public function handleSaveSiteIgnores(array $params): bool
+	{
+		$domain = (string)($params['site_ignore_domain'] ?? '');
+		$map = (array)($this->getSettings()['site_ignores'] ?? []);
+		$map[$domain] = (string)($params['site_ignore_text'] ?? '');
+		if (!$this->kopiabackup_set_settings(['site_ignores' => $map])) {
+			$this->editSite = $domain;
+
+			return false;
+		}
+
+		return success('Ignore rules saved for %s', $domain);
+	}
+
+	public function getEditSite(): ?string
+	{
+		return $this->editSite;
 	}
 
 	public function getSites(): array

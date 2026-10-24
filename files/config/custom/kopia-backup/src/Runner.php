@@ -13,16 +13,6 @@ class Runner
 	public const STATE_DIR = '/var/lib/kopia-backup';
 	public const CACHE_DIR = '/var/cache/kopia-backup';
 
-	// relative to the site's shadow root; gitignore syntax, anchored
-	public const IGNORES = [
-		'/tmp',
-		'/var/log',
-		'/var/www/*/wp-content/cache',
-		'/var/www/*/wp-content/wflogs',
-		'/home/*/mysql_backups',
-		'/home/*/.cache',
-	];
-
 	private string $domain;
 	private string $stateDir;
 	private string $cacheDir;
@@ -68,6 +58,7 @@ class Runner
 		$this->report = ['site' => $this->site, 'domain' => $this->domain, 'started' => time(), 'ok' => false];
 		try {
 			$this->ensureRepo();
+			$this->applyIgnores();
 			$this->report['databases'] = $this->dumpDatabases();
 			$this->dumpAcls();
 			$this->report['snapshots'] = $this->snapshot();
@@ -164,14 +155,31 @@ class Runner
 			'--compression', 'zstd',
 			'--ignore-file-errors', 'true', '--ignore-dir-errors', 'true',
 		]);
-		$ignores = [];
-		foreach (self::IGNORES as $pattern) {
-			array_push($ignores, '--add-ignore', $pattern);
-		}
-		$this->kopia(array_merge(['policy', 'set', $this->shadowPath()], $ignores));
 		// locks are renewed by full maintenance, which must run at least a day inside the lock period
 		$this->kopia(['maintenance', 'set', '--extend-object-locks', 'true', '--full-interval', '24h', '--quick-interval', '4h']);
 		info('%s: repository created', $this->domain);
+	}
+
+	/**
+	 * Ignore rules live in the repo as a policy on the shadow path, so re-apply them every run:
+	 * global list plus this site's additions, replacing whatever was there.
+	 */
+	private function applyIgnores(): void
+	{
+		$patterns = array_filter(array_merge(
+			preg_split('/\R/', (string)$this->settings['ignore']),
+			preg_split('/\R/', (string)($this->settings['site_ignores'][$this->domain] ?? ''))
+		));
+		$this->kopia(['policy', 'set', $this->shadowPath(), '--clear-ignore']);
+		if (!$patterns) {
+			return;
+		}
+		$args = ['policy', 'set', $this->shadowPath()];
+		foreach (array_unique($patterns) as $pattern) {
+			array_push($args, '--add-ignore', $pattern);
+		}
+		$this->kopia($args);
+		$this->report['ignores'] = array_values(array_unique($patterns));
 	}
 
 	/**
