@@ -56,6 +56,7 @@ class Runner
 		}
 
 		$this->report = ['site' => $this->site, 'domain' => $this->domain, 'started' => time(), 'ok' => false];
+		file_put_contents("{$this->stateDir}/last.json", json_encode($this->report, JSON_PRETTY_PRINT));
 		try {
 			$this->ensureRepo();
 			$this->applyIgnores();

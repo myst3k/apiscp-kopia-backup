@@ -41,7 +41,10 @@
 
 	<div class="col-12 col-sm-8 col-lg-9 col-xl-10 float-left tab-content">
 		<div class="tab-pane {{ $Page->getRecoveryKit() ? '' : 'active' }}" id="sites" role="tabpanel">
-			@php $sites = $Page->getSites(); $editSite = $Page->getEditSite(); @endphp
+			@php $sites = $Page->getSites(); $editSite = $Page->getEditSite(); $jobs = $Page->getJobs(); @endphp
+			<div id="kb-activity" class="alert alert-info {{ $jobs ? '' : 'd-none' }}">
+				Running: <span id="kb-activity-list">{{ implode(', ', array_map(static fn($j) => str_replace('-', ' ', $j), $jobs)) }}</span>
+			</div>
 			@if ($editSite)
 				<div class="card mb-3">
 					<div class="card-body">
@@ -79,21 +82,26 @@
 				</thead>
 				<tbody>
 					@foreach ($sites as $siteId => $st)
-						<tr>
+						<tr data-site="{{ $siteId }}">
 							<td>{{ $st['domain'] }}</td>
-							<td>{{ $st['finished'] ? date('M j, Y H:i', $st['finished']) : 'never' }}</td>
-							<td>
+							<td class="kb-last">{{ $st['finished'] ? date('M j, Y H:i', $st['finished']) : 'never' }}</td>
+							<td class="kb-result">
 								@if ($st['running'])
-									<span class="badge badge-info">running</span>
+									<span class="badge badge-info">running{{ $st['started'] ? ' since ' . date('H:i', $st['started']) : '' }}</span>
 								@elseif ($st['ok'] === true)
 									<span class="badge badge-success">ok</span>
+								@elseif ($st['ok'] === 'interrupted')
+									<span class="badge badge-warning">interrupted</span>
 								@elseif ($st['ok'] === false)
 									<span class="badge badge-danger" title="{{ $st['error'] }}">failed</span>
 								@endif
+								@if ($st['verifying'])
+									<span class="badge badge-info">verifying</span>
+								@endif
 							</td>
-							<td>{{ $st['finished'] ? $st['databases'] : '' }}</td>
-							<td>{{ $st['size'] ? \Formatter::reduceBytes($st["size"]) : '' }}</td>
-							<td>
+							<td class="kb-dbs">{{ $st['finished'] ? $st['databases'] : '' }}</td>
+							<td class="kb-size">{{ $st['size'] ? \Formatter::reduceBytes($st["size"]) : '' }}</td>
+							<td class="kb-verified">
 								@if ($st['verified'])
 									{{ date('M j', $st['verified']) }}
 									<span class="badge badge-{{ $st['verify_ok'] ? 'success' : 'danger' }}">{{ $st['verify_ok'] ? 'ok' : 'failed' }}</span>
@@ -110,7 +118,7 @@
 					@endforeach
 				</tbody>
 			</table>
-			<p class="text-muted">Buttons queue jobs; watch them in the job indicator at the top of the panel.
+			<p class="text-muted">Backups and verifications run in the background on the server; this table refreshes itself while they run.
 				Verify runs <code>kopia snapshot verify</code> (every object referenced by every snapshot must exist, {{ (int)$s['verify_percent'] }}% of file contents re-downloaded and hashed)
 				and reads the object-lock retention Wasabi reports on a sample of the repository.</p>
 		</div>

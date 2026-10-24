@@ -288,6 +288,95 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
+	 * Start a site backup in the background. Runs as a transient systemd unit rather than a panel job:
+	 * the panel queue re-dispatches anything that outlives its retry window, which a multi-GB backup does.
+	 */
+	public function schedule(string $site): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_schedule', $site);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+
+		return $this->startUnit("run-site{$id}", ['kopiabackup:run', "site{$id}"])
+			&& success('backup of %s started; the Sites table updates as it runs', $site);
+	}
+
+	public function schedule_all(): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_schedule_all');
+		}
+
+		return $this->startUnit('run-all', ['kopiabackup:run-all'])
+			&& success('backup of all sites started; the Sites table updates as it runs');
+	}
+
+	public function schedule_verify(string $site): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_schedule_verify', $site);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+
+		return $this->startUnit("verify-site{$id}", ['kopiabackup:verify', "site{$id}"])
+			&& success('verification of %s started; the Sites table updates as it runs', $site);
+	}
+
+	public function schedule_verify_all(): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_schedule_verify_all');
+		}
+
+		return $this->startUnit('verify-all', ['kopiabackup:verify-all'])
+			&& success('verification of all sites started; the Sites table updates as it runs');
+	}
+
+	/**
+	 * Transient unit kopia-backup-<name>.service running cpcmd; a second start of the same name is refused
+	 */
+	private function startUnit(string $name, array $cmd): bool
+	{
+		$unit = 'kopia-backup-' . $name;
+		$ret = \Util_Process_Safe::exec(array_merge([
+			'systemd-run', '--unit', $unit, '--collect', '--quiet',
+			'--property=Nice=19', '--property=IOSchedulingClass=idle',
+			INCLUDE_PATH . '/bin/cmd',
+		], $cmd));
+		if ($ret['success']) {
+			return true;
+		}
+		if (str_contains($ret['stderr'], 'already exists') || str_contains($ret['stderr'], 'already loaded')) {
+			return error('%s is already running', str_replace('-', ' ', $name));
+		}
+
+		return error('could not start %s: %s', $unit, trim($ret['stderr']));
+	}
+
+	/**
+	 * Active transient units, e.g. ["run-all", "verify-site3"]
+	 *
+	 * @return string[]
+	 */
+	private function activeUnits(): array
+	{
+		$ret = \Util_Process_Safe::exec(['systemctl', 'list-units', '--plain', '--no-legend', '--state=active,activating', 'kopia-backup-*.service']);
+		$units = [];
+		foreach (preg_split('/\R/', trim($ret['stdout'] ?? '')) as $line) {
+			if (preg_match('/^kopia-backup-(\S+)\.service/', trim($line), $m)) {
+				$units[] = $m[1];
+			}
+		}
+
+		return $units;
+	}
+
+	/**
 	 * Run a cpcmd subcommand for each site, $parallel at a time
 	 *
 	 * @return array site => ok|failed
@@ -376,69 +465,18 @@ class Kopiabackup_Module extends \Module_Skeleton
 		return $report;
 	}
 
-	public function schedule_verify(string $site): bool
-	{
-		if (null === \Auth::get_site_id_from_anything($site)) {
-			return error("unknown site `%s'", $site);
-		}
-		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_verify', $site);
-		$job->timeout = 6 * 3600;
-		$job->setTags(['kopia-verify', $site]);
-		$job->dispatch();
-
-		return success('verification queued for %s; progress shows in the job indicator', $site);
-	}
-
-	public function schedule_verify_all(): bool
-	{
-		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_verify_all');
-		$job->timeout = 12 * 3600;
-		$job->setTags(['kopia-verify', 'all sites']);
-		$job->dispatch();
-
-		return success('verification of all sites queued; progress shows in the job indicator');
-	}
-
-	/**
-	 * Queue a backup of every site as one panel job
-	 */
-	public function schedule_all(): bool
-	{
-		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_run_all');
-		$job->timeout = 12 * 3600;
-		$job->setTags(['kopia-backup', 'all sites']);
-		$job->dispatch();
-
-		return success('backup of all sites queued; progress shows in the job indicator');
-	}
-
-	/**
-	 * Queue a site backup as a panel job so the UI returns at once
-	 */
-	public function schedule(string $site): bool
-	{
-		if (null === \Auth::get_site_id_from_anything($site)) {
-			return error("unknown site `%s'", $site);
-		}
-		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_run', $site);
-		$job->timeout = 6 * 3600;
-		$job->setTags(['kopia-backup', $site]);
-		$job->dispatch();
-
-		return success('backup queued for %s; progress shows in the job indicator', $site);
-	}
-
 	/**
 	 * Per-site last run summary
 	 *
-	 * @return array siteN => {domain, running, ok, finished, started, size, databases, error}
+	 * @return array siteN => {domain, running, verifying, ok, finished, started, size, databases, error, verified, verify_ok}, plus _jobs => active unit names
 	 */
 	public function status(): array
 	{
 		if (!IS_CLI) {
 			return $this->query('kopiabackup_status');
 		}
-		$out = [];
+		$units = $this->activeUnits();
+		$out = ['_jobs' => $units];
 		foreach (Enumerate::active() as $site) {
 			$st = Runner::status($site);
 			$size = 0;
@@ -447,8 +485,10 @@ class Kopiabackup_Module extends \Module_Skeleton
 			}
 			$out[$site] = [
 				'domain'    => (string)(new \Opcenter\SiteConfiguration($site))->getServiceValue('siteinfo', 'domain'),
-				'running'   => $st['running'],
-				'ok'        => $st['ok'],
+				'running'   => $st['running'] || in_array("run-{$site}", $units, true),
+				'verifying' => in_array("verify-{$site}", $units, true),
+				// a report with a start but no finish and no lock holder means the process died
+				'ok'        => $st['ok'] === false && !$st['finished'] && !$st['running'] ? 'interrupted' : $st['ok'],
 				'started'   => $st['started'] ?? null,
 				'finished'  => $st['finished'],
 				'size'      => $size,

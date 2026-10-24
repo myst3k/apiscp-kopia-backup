@@ -189,9 +189,27 @@ class Page extends Page_Container
 		return $this->editSite;
 	}
 
+	protected function _layout()
+	{
+		parent::_layout();
+		$this->add_javascript('kopiabackup.js');
+	}
+
+	protected ?array $status = null;
+
+	private function status(): array
+	{
+		return $this->status ??= (array)$this->kopiabackup_status();
+	}
+
 	public function getSites(): array
 	{
-		return (array)$this->kopiabackup_status();
+		return array_filter($this->status(), static fn($k) => $k[0] !== '_', ARRAY_FILTER_USE_KEY);
+	}
+
+	public function getJobs(): array
+	{
+		return (array)($this->status()['_jobs'] ?? []);
 	}
 
 	public function isTimerEnabled(): bool
