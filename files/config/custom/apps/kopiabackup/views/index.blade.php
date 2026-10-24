@@ -192,7 +192,13 @@
 				</table>
 				<dl class="row text-muted mb-0">
 					<dt class="col-sm-2">Back up now</dt>
-					<dd class="col-sm-10">Dumps the site's databases and snapshots its files into its repository. Runs on the server in the background; the table updates while it runs.</dd>
+					<dd class="col-sm-10">
+						<ul class="mb-0 pl-3">
+							<li>Dumps each database to plain SQL</li>
+							<li>Snapshots the site's files into its own repository</li>
+							<li>Runs in the background; the table updates as it goes</li>
+						</ul>
+					</dd>
 					<dt class="col-sm-2">Verify</dt>
 					<dd class="col-sm-10">
 						<ul class="mb-0 pl-3">
@@ -204,7 +210,14 @@
 						</ul>
 					</dd>
 					<dt class="col-sm-2">Manage</dt>
-					<dd class="col-sm-10">Everything about one site: status, verification detail, logs, its own ignore rules, and reset.</dd>
+					<dd class="col-sm-10">
+						<ul class="mb-0 pl-3">
+							<li>Status and run history</li>
+							<li>Verification detail and logs</li>
+							<li>Ignore rules for that site</li>
+							<li>Reset local state</li>
+						</ul>
+					</dd>
 				</dl>
 			@endif
 		</div>
