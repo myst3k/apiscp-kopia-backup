@@ -154,6 +154,11 @@ class Page extends Page_Container
 		return success('Ignore rules saved for %s', $domain);
 	}
 
+	public function handleReset(array $params): bool
+	{
+		return $this->kopiabackup_reset((string)$params['reset']);
+	}
+
 	public function getEditSite(): ?string
 	{
 		return $this->editSite;

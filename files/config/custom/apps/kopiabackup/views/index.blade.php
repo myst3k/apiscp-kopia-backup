@@ -93,6 +93,9 @@
 								<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
 									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
 								<button type="submit" name="edit_ignores" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm">Rules{{ !empty($s['site_ignores'][$st['domain']]) ? ' *' : '' }}</button>
+								<button type="submit" name="reset" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm warn"
+									data-prompt="Forget local backup state for {{ $st['domain'] }}? Nothing in the bucket is deleted. Use after removing or replacing its repository in Wasabi."
+									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Reset</button>
 							</td>
 						</tr>
 					@endforeach

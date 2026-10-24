@@ -174,6 +174,35 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
+	 * Forget a site's local backup state (Kopia connection, cache, last run and verify reports).
+	 * Nothing in the bucket is touched: the next run reconnects to the repository if it still exists,
+	 * otherwise it creates a new one.
+	 */
+	public function reset(string $site): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_reset', $site);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$siteN = "site{$id}";
+		if (Runner::status($siteN)['running']) {
+			return error('%s: backup running, try again when it finishes', $site);
+		}
+		foreach ([Runner::STATE_DIR . "/{$siteN}", Runner::CACHE_DIR . "/{$siteN}"] as $dir) {
+			if (is_dir($dir)) {
+				$ret = \Util_Process_Safe::exec(['rm', '-rf', '--one-file-system', $dir]);
+				if (!$ret['success']) {
+					return error('failed to remove %s: %s', $dir, trim($ret['stderr']));
+				}
+			}
+		}
+
+		return info('%s: local backup state cleared; next run starts fresh', $site);
+	}
+
+	/**
 	 * Back up one site now, in the foreground
 	 *
 	 * @param string $site domain or siteN
