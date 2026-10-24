@@ -42,6 +42,10 @@
 			@if (!$s['bucket'] || !$s['access_key'])
 				<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
 			@endif
+			<div class="mb-3">
+				<button type="submit" name="backup_all" value="1" class="btn btn-primary" {{ $s['bucket'] ? '' : 'disabled' }}>Back up all sites</button>
+				<span class="text-muted ml-2">{{ (int)$s['parallel'] }} at a time, queued as one job</span>
+			</div>
 			<table class="table">
 				<thead>
 					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Databases</th><th>Size</th><th></th></tr>
@@ -186,6 +190,15 @@
 					@endforeach
 				</select>
 				<small class="form-text text-muted">Applied on the next <code>upcp -b</code> or add-in run.</small>
+			</div>
+			<div class="form-group col-md-4 px-0">
+				<label for="parallel">Sites backed up at once</label>
+				<select class="form-control custom-select" id="parallel" name="parallel">
+					@foreach (range(1, 8) as $n)
+						<option value="{{ $n }}" {{ (int)$s['parallel'] === $n ? 'selected' : '' }}>{{ $n }}</option>
+					@endforeach
+				</select>
+				<small class="form-text text-muted">Used by Back up all sites and the nightly timer.</small>
 			</div>
 			<input type="hidden" name="timer_form" value="1"/>
 			<div class="form-group custom-control custom-checkbox">

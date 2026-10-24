@@ -20,6 +20,8 @@ class Settings
 		'keep_days'  => 180,
 		// read by the Bootstrapper add-in: 'latest' or an exact version such as 0.21.1
 		'kopia_version' => 'latest',
+		// sites backed up at the same time by run-all and the nightly timer
+		'parallel'      => 2,
 	];
 
 	private const SECRETS = ['secret_key'];
@@ -143,6 +145,12 @@ class Settings
 		}
 		$value = trim((string)$value);
 		switch ($key) {
+			case 'parallel':
+				if (!ctype_digit($value) || (int)$value < 1 || (int)$value > 8) {
+					return $fail('parallel must be between 1 and 8');
+				}
+
+				return (int)$value;
 			case 'lock_days':
 			case 'keep_days':
 				if (!ctype_digit($value) || (int)$value < 2 || (int)$value > self::MAX_DAYS) {

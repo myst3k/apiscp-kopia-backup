@@ -9,7 +9,7 @@ class Page extends Page_Container
 {
 	public const FIELDS = [
 		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days',
-		'kopia_version',
+		'kopia_version', 'parallel',
 	];
 
 	public const GROUPS = [
@@ -114,6 +114,11 @@ class Page extends Page_Container
 	public function getRecoveryKit(): ?array
 	{
 		return $this->kit;
+	}
+
+	public function handleBackupAll(array $params): bool
+	{
+		return $this->kopiabackup_schedule_all();
 	}
 
 	public function getSites(): array

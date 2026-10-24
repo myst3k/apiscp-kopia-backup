@@ -164,7 +164,9 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
-	 * Back up every active site, one after another. Errors are collected so one site cannot stop the rest.
+	 * Back up every active site, N at a time (the "parallel" setting). Each site runs in its own
+	 * cpcmd process so one failure cannot take the rest down, and the per-site lock prevents overlap
+	 * with a Back up now job.
 	 *
 	 * @return array site => ok|failed
 	 */
@@ -173,16 +175,65 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if (!IS_CLI) {
 			return $this->query('kopiabackup_run_all');
 		}
+		$s = Settings::load();
+		if ($missing = Settings::missing($s)) {
+			return error('missing settings: %s', implode(', ', $missing));
+		}
+		$parallel = max(1, (int)$s['parallel']);
+		$pending = Enumerate::active();
+		$running = [];
 		$out = [];
-		foreach (Enumerate::active() as $site) {
-			$report = $this->run($site);
-			$out[$site] = is_array($report) && !empty($report['ok']) ? 'ok' : 'failed';
+		$cmd = INCLUDE_PATH . '/bin/cmd';
+		while ($pending || $running) {
+			while ($pending && count($running) < $parallel) {
+				$site = array_shift($pending);
+				$pipes = [];
+				$proc = proc_open([$cmd, 'kopiabackup:run', $site], [1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']], $pipes);
+				if (!is_resource($proc)) {
+					$out[$site] = 'failed';
+					warn('%s: could not start backup process', $site);
+					continue;
+				}
+				stream_set_blocking($pipes[2], false);
+				$running[$site] = ['proc' => $proc, 'err' => $pipes[2], 'buf' => ''];
+			}
+			foreach ($running as $site => &$r) {
+				$r['buf'] .= (string)stream_get_contents($r['err']);
+				$status = proc_get_status($r['proc']);
+				if ($status['running']) {
+					continue;
+				}
+				fclose($r['err']);
+				proc_close($r['proc']);
+				$out[$site] = $status['exitcode'] === 0 ? 'ok' : 'failed';
+				if ($status['exitcode'] !== 0) {
+					warn('%s: %s', $site, trim($r['buf']) ?: "exit {$status['exitcode']}");
+				}
+				unset($running[$site]);
+			}
+			unset($r);
+			if ($running) {
+				usleep(500000);
+			}
 		}
 		if ($failed = array_keys($out, 'failed', true)) {
 			error('backup failed for: %s', implode(', ', $failed));
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Queue a backup of every site as one panel job
+	 */
+	public function schedule_all(): bool
+	{
+		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_run_all');
+		$job->timeout = 12 * 3600;
+		$job->setTags(['kopia-backup', 'all sites']);
+		$job->dispatch();
+
+		return info('backup of all sites queued');
 	}
 
 	/**
@@ -308,8 +359,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 
 	/**
 	 * Master secret every repository password derives from. Created on first use.
-	 * Reveal with `cpcmd keyring:get kopiabackup.master` and store it in a password manager: without it
-	 * nothing in the bucket can be read.
+	 * The Recovery section of the admin page shows it (keyring:get only returns the encrypted form).
+	 * Without it nothing in the bucket can be read.
 	 */
 	private function master(): string
 	{
@@ -320,7 +371,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if (!$this->keyring_set(self::MASTER_KEY, $new)) {
 			throw new \RuntimeException('failed to store master secret in keyring');
 		}
-		warn('created master backup secret; save it now: cpcmd keyring:get %s', self::MASTER_KEY);
+		warn('created master backup secret; open Recovery in the admin page and store the kit in a password manager');
 
 		return $new;
 	}
