@@ -49,6 +49,9 @@
 			if (st.verifying) {
 				result.append(' ').append(badge('info', 'verifying'));
 			}
+			if (st.restoring) {
+				result.append(' ').append(badge('info', 'restoring'));
+			}
 			var snaps = row.find('.kb-snapshots').empty();
 			if (st.snapshots !== null && st.snapshots !== undefined) {
 				snaps.text(st.snapshots).append($('<small>').addClass('text-muted').text(' since ' + stamp(st.oldest)));

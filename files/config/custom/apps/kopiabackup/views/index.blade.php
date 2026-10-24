@@ -109,6 +109,55 @@
 					@endif
 				@endif
 
+				@php $snapshots = $st && $st['finished'] ? $Page->getSnapshots($editSite) : []; @endphp
+				@if ($snapshots)
+					<h5>Restore</h5>
+					@if ($st['restoring'])
+						<div class="alert alert-info">A restore is running; its log appears below when it finishes.</div>
+					@endif
+					<div class="form-group col-md-6 px-0">
+						<label for="restore_run">Snapshot</label>
+						<select class="form-control custom-select" id="restore_run" name="restore_run">
+							@foreach ($snapshots as $snap)
+								<option value="{{ $snap['run'] }}">{{ date('M j, Y H:i', $snap['time']) }} &mdash; {{ \Formatter::reduceBytes($snap['size']) }}, {{ number_format($snap['files']) }} files, {{ count($snap['databases']) }} database{{ count($snap['databases']) === 1 ? '' : 's' }}</option>
+							@endforeach
+						</select>
+					</div>
+					<div class="row">
+						<div class="col-md-6">
+							<h6>Files</h6>
+							<div class="form-group">
+								<label for="restore_path">Path inside the site</label>
+								<input type="text" class="form-control" id="restore_path" name="restore_path" value="var/www" placeholder="empty = entire site"/>
+								<small class="form-text text-muted">Written to <code>~/restore/&lt;date&gt;/</code> in the site's home with original owners. Nothing live is touched; copy back what you need.</small>
+							</div>
+							<button type="submit" name="restore_files" value="1" class="btn btn-secondary" {{ $st['restoring'] ? 'disabled' : '' }}>Restore files</button>
+						</div>
+						<div class="col-md-6">
+							<h6>Database</h6>
+							<div class="form-group">
+								<label for="restore_db">Database</label>
+								<select class="form-control custom-select" id="restore_db" name="restore_db">
+									@foreach ($snapshots[0]['databases'] as $db)
+										<option value="{{ $db }}">{{ $db }}</option>
+									@endforeach
+								</select>
+							</div>
+							<div class="form-group">
+								<label for="restore_mode">Into</label>
+								<select class="form-control custom-select" id="restore_mode" name="restore_mode">
+									<option value="new">a new database (&lt;name&gt;_r&lt;date&gt;)</option>
+									<option value="replace">the live database, replacing its tables</option>
+								</select>
+							</div>
+							<button type="submit" name="restore_db" value="1" class="btn btn-secondary warn"
+								data-prompt="Restore this database from the selected snapshot? If you chose the live database, its current tables are replaced."
+								{{ $st['restoring'] || !$snapshots[0]['databases'] ? 'disabled' : '' }}>Restore database</button>
+						</div>
+					</div>
+					<p class="text-muted mt-3 mb-4">Restores run in the background. The outcome, including the exact path or database name, is in the restore log below.</p>
+				@endif
+
 				@if ($logs)
 					<h5>Logs</h5>
 					<div class="form-inline mb-2">
@@ -214,6 +263,7 @@
 						<ul class="mb-0 pl-3">
 							<li>Status and run history</li>
 							<li>Verification detail and logs</li>
+							<li>Restore files or a database from any snapshot</li>
 							<li>Ignore rules for that site</li>
 							<li>Reset local state</li>
 						</ul>

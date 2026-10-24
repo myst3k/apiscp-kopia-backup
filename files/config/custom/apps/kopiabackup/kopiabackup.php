@@ -213,6 +213,23 @@ class Page extends Page_Container
 		return is_string($text) ? ['name' => $name, 'text' => $text] : null;
 	}
 
+	public function handleRestoreFiles(array $params): bool
+	{
+		return $this->kopiabackup_restore_files($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_path'] ?? ''));
+	}
+
+	public function handleRestoreDb(array $params): bool
+	{
+		return $this->kopiabackup_restore_db($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_db'] ?? ''), (string)($params['restore_mode'] ?? 'new'));
+	}
+
+	public function getSnapshots(string $domain): array
+	{
+		$list = $this->kopiabackup_snapshots($domain, 30);
+
+		return is_array($list) ? $list : [];
+	}
+
 	public function handleReset(array $params): bool
 	{
 		return $this->kopiabackup_reset((string)$params['reset']);

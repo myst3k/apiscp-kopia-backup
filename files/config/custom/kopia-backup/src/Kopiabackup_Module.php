@@ -493,6 +493,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'domain'    => (string)(new \Opcenter\SiteConfiguration($site))->getServiceValue('siteinfo', 'domain'),
 				'running'   => $st['running'] || in_array("run-{$site}", $units, true),
 				'verifying' => in_array("verify-{$site}", $units, true),
+				'restoring' => in_array("restore-files-{$site}", $units, true) || in_array("restore-db-{$site}", $units, true),
 				'ok'        => $st['interrupted'] ? 'interrupted' : $st['ok'],
 				'started'   => $st['run_started'] ?? $st['started'] ?? null,
 				'finished'  => $st['finished'],
@@ -519,6 +520,113 @@ class Kopiabackup_Module extends \Module_Skeleton
 		}
 
 		return $out;
+	}
+
+	/**
+	 * Snapshot runs available to restore from
+	 */
+	public function snapshots(string $site, int $limit = 30): array|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_snapshots', $site, $limit);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		if ($missing = Settings::missing($s)) {
+			return error('missing settings: %s', implode(', ', $missing));
+		}
+		try {
+			return (new Runner($s, "site{$id}", $this->master()))->listSnapshots($limit);
+		} catch (\Throwable $e) {
+			return error('%s: %s', $site, $e->getMessage());
+		}
+	}
+
+	/**
+	 * Restore files from a run into the site admin's ~/restore/<date>/, in the background
+	 *
+	 * @param string $run     run tag from kopiabackup:snapshots
+	 * @param string $subpath path inside the site, empty for everything
+	 */
+	public function restore_files(string $site, string $run, string $subpath = ''): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_restore_files', $site, $run, $subpath);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+
+		return $this->startUnit("restore-files-site{$id}", ['kopiabackup:restore_files_now', "site{$id}", $run, $subpath])
+			&& success('file restore for %s started; the result appears in its log under Manage', $site);
+	}
+
+	/**
+	 * Restore a database from a run, in the background
+	 *
+	 * @param string $mode new (into <db>_r<date>) or replace (over the live database)
+	 */
+	public function restore_db(string $site, string $run, string $db, string $mode = 'new'): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_restore_db', $site, $run, $db, $mode);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+
+		return $this->startUnit("restore-db-site{$id}", ['kopiabackup:restore_db_now', "site{$id}", $run, $db, $mode])
+			&& success('database restore for %s started; the result appears in its log under Manage', $site);
+	}
+
+	/**
+	 * Foreground file restore; what the background unit runs
+	 *
+	 * @return string|bool path written, as the site owner sees it
+	 */
+	public function restore_files_now(string $site, string $run, string $subpath = ''): string|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_restore_files_now', $site, $run, $subpath);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		try {
+			$path = (new Runner($s, "site{$id}", $this->master()))->restoreFiles($run, $subpath);
+		} catch (\Throwable $e) {
+			return error('%s: %s', $site, $e->getMessage());
+		}
+		info('%s: files restored to %s', $site, $path);
+
+		return $path;
+	}
+
+	/**
+	 * Foreground database restore; what the background unit runs
+	 *
+	 * @return string|bool database the data went into
+	 */
+	public function restore_db_now(string $site, string $run, string $db, string $mode = 'new'): string|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_restore_db_now', $site, $run, $db, $mode);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		try {
+			$target = (new Runner($s, "site{$id}", $this->master()))->restoreDatabase($run, $db, $mode);
+		} catch (\Throwable $e) {
+			return error('%s: %s', $site, $e->getMessage());
+		}
+		info('%s: database restored into %s', $site, $target);
+
+		return $target;
 	}
 
 	/**

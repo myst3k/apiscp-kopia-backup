@@ -2,7 +2,7 @@
 
 ApisCP add-in: per-site Kopia backups to an object-locked S3 bucket. Installs Kopia from the official RPM repo, registers the `kopiabackup` module, and adds **System → Kopia Backup** to the admin panel.
 
-Status: early. Settings, bucket verification, per-site backups and the nightly timer are written; restores are not yet. Not yet proven on a live server beyond the bucket check.
+Status: settings, bucket verification, per-site backups, verification, the nightly timer and restores are written and running on one server. Treat it as beta until a few weeks of nightly runs and restores have gone by.
 
 ## Install
 
@@ -72,6 +72,7 @@ Enter the settings on the admin page, then **Save & test bucket**. CLI equivalen
 - **Kopia** section: how many sites run at once (default 2) and the nightly timer toggle (02:30). Each site runs in its own `cpcmd` process under `nice`/`ionice`.
 - **Verify** per site or **Verify all sites**: `kopia snapshot verify` (every referenced object must exist; a configurable percentage of file contents is downloaded and re-hashed) plus a sample of object-lock retention read back from the bucket. Also runs weekly after the nightly backup on the configured day.
 - **Reset** (under a site's **Manage** panel) forgets the local state (connection, cache, reports) without touching the bucket. Use it after deleting a repository in Wasabi; the next run creates a fresh one. Locked objects can only be deleted by the root account with bypass-governance in GOVERNANCE mode, and not at all in COMPLIANCE mode until they expire; in that case change the Prefix instead.
+- **Restore** (in a site's **Manage** view): pick a snapshot, then restore a path of the site tree into `~/restore/<date>/` in the site admin's home (original owners, nothing live touched), or restore a database into `<name>_r<date>` or over the live one. CLI: `cpcmd kopiabackup:snapshots <site>`, `restore-files <site> <run> [path]`, `restore-db <site> <run> <db> [new|replace]`.
 - Logs: the **Manage** panel shows each run's log (steps, sizes, timings, errors); `cpcmd kopiabackup:logs <site>` and `kopiabackup:log <site> <name>` from the CLI.
 - CLI: `cpcmd kopiabackup:run <site>`, `run-all`, `verify <site>`, `verify-all`, `verify-locks <site>`, `reset <site>`, `status`.
 

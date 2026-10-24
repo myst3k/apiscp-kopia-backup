@@ -377,7 +377,7 @@ class Runner
 			"{$this->stateDir}/acl.txt",
 		], 'file_exists'));
 		$t = microtime(true);
-		$ret = $this->kopia(array_merge(['snapshot', 'create', '--json', '--parallel', '2'], $paths), true, true);
+		$ret = $this->kopia(array_merge(['snapshot', 'create', '--json', '--parallel', '2', '--tags', 'run:' . $this->report['started']], $paths), true, true);
 		$elapsed = microtime(true) - $t;
 
 		$decoded = json_decode(trim($ret['stdout']), true);
@@ -425,6 +425,237 @@ class Runner
 		return $ret;
 	}
 
+	/**
+	 * Snapshots grouped per run, newest first. Each run produced one snapshot per source
+	 * (site tree, info, database dumps, ACLs); the run tag ties them together.
+	 *
+	 * @return array<int, array{run: string, time: int, size: int, files: int, sources: array<string, string>, databases: string[]}>
+	 */
+	public function listSnapshots(int $limit = 30): array
+	{
+		$this->ensureRepo(false);
+		$ret = $this->kopia(['snapshot', 'list', '--all', '--json']);
+		$list = json_decode($ret['stdout'], true);
+		if (!is_array($list)) {
+			return [];
+		}
+		$runs = [];
+		foreach ($list as $snap) {
+			$path = $snap['source']['path'] ?? '';
+			$time = strtotime($snap['startTime'] ?? '') ?: 0;
+			// snapshots from before tagging are grouped by the minute they started
+			$run = $snap['tags']['run'] ?? (string)($time - $time % 60);
+			$runs[$run] ??= ['run' => $run, 'time' => $time, 'size' => 0, 'files' => 0, 'sources' => [], 'databases' => []];
+			$runs[$run]['time'] = max($runs[$run]['time'], $time);
+			if ($path === $this->shadowPath()) {
+				$runs[$run]['sources']['files'] = $snap['id'];
+				$runs[$run]['size'] += (int)($snap['rootEntry']['summ']['size'] ?? 0);
+				$runs[$run]['files'] = (int)($snap['rootEntry']['summ']['files'] ?? 0);
+			} elseif ($path === "{$this->stateDir}/db") {
+				$runs[$run]['sources']['db'] = $snap['id'];
+				$runs[$run]['size'] += (int)($snap['rootEntry']['summ']['size'] ?? 0);
+			} elseif ($path === "/home/virtual/{$this->site}/info") {
+				$runs[$run]['sources']['info'] = $snap['id'];
+			} elseif ($path === "{$this->stateDir}/acl.txt") {
+				$runs[$run]['sources']['acl'] = $snap['id'];
+			}
+		}
+		usort($runs, static fn($a, $b) => $b['time'] <=> $a['time']);
+		$runs = array_slice($runs, 0, $limit);
+		foreach ($runs as &$r) {
+			if (isset($r['sources']['db'])) {
+				$r['databases'] = $this->databasesIn($r['sources']['db']);
+			}
+		}
+		unset($r);
+
+		return $runs;
+	}
+
+	/**
+	 * @return string[] database names dumped in a db-source snapshot
+	 */
+	private function databasesIn(string $snapshotId): array
+	{
+		$ret = $this->kopia(['ls', $snapshotId], false);
+		$dbs = [];
+		foreach (preg_split('/\R/', trim((string)$ret['stdout'])) as $name) {
+			if (str_ends_with($name, '.sql')) {
+				$dbs[] = substr($name, 0, -4);
+			}
+		}
+
+		return $dbs;
+	}
+
+	/**
+	 * Restore part of the site tree into the site admin's home, never over the live files.
+	 *
+	 * @param string $run     run tag from listSnapshots
+	 * @param string $subpath path inside the site, e.g. var/www/html/wp-content/uploads; empty for everything
+	 * @return string path the files were written to
+	 */
+	public function restoreFiles(string $run, string $subpath): string
+	{
+		$subpath = trim($subpath, '/');
+		if ($subpath !== '' && (str_contains($subpath, '..') || !preg_match('!^[A-Za-z0-9._@/-]+$!', $subpath))) {
+			throw new \RuntimeException("invalid path `{$subpath}'");
+		}
+		$snap = $this->findRun($run);
+		if (empty($snap['sources']['files'])) {
+			throw new \RuntimeException("run {$run} has no file snapshot");
+		}
+		$this->openLog('restore');
+		$this->log("restore files from run {$run} (" . date('Y-m-d H:i', $snap['time']) . "), path: " . ($subpath ?: '(entire site)'));
+
+		$target = $this->restoreRoot() . '/' . date('Ymd-His') . ($subpath !== '' ? "/{$subpath}" : '');
+		if (!is_dir($target) && !mkdir($target, 0750, true)) {
+			throw new \RuntimeException("cannot create {$target}");
+		}
+		$t = microtime(true);
+		$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
+		$ret = $this->kopia(['restore', '--parallel', '4', $source, $target], false, true);
+		if (!$ret['success']) {
+			$this->log('FAILED: ' . trim($ret['stderr']));
+			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
+		}
+		// restore writes original owners; the directories we made are root's, hand them to the site admin
+		$this->chownToAdmin($this->restoreRoot(), $target);
+		$this->log(sprintf('restored to %s in %.1fs', $this->visiblePath($target), microtime(true) - $t));
+
+		return $this->visiblePath($target);
+	}
+
+	/**
+	 * Restore one database dump from a run, either into a fresh database or over the live one.
+	 *
+	 * @param string $mode new|replace
+	 * @return string database the data went into
+	 */
+	public function restoreDatabase(string $run, string $db, string $mode): string
+	{
+		if (!preg_match('/^[A-Za-z0-9_]+$/', $db)) {
+			throw new \RuntimeException("invalid database name `{$db}'");
+		}
+		if (!in_array($mode, ['new', 'replace'], true)) {
+			throw new \RuntimeException("mode must be new or replace");
+		}
+		$snap = $this->findRun($run);
+		if (empty($snap['sources']['db'])) {
+			throw new \RuntimeException("run {$run} has no database snapshot");
+		}
+		if (!in_array($db, $this->databasesIn($snap['sources']['db']), true)) {
+			throw new \RuntimeException("database {$db} is not in run {$run}");
+		}
+		$this->openLog('restore');
+		$this->log("restore database {$db} from run {$run} (" . date('Y-m-d H:i', $snap['time']) . "), mode {$mode}");
+
+		$staging = "{$this->stateDir}/restore";
+		if (!is_dir($staging) && !mkdir($staging, 0700, true)) {
+			throw new \RuntimeException("cannot create {$staging}");
+		}
+		$file = "{$staging}/{$db}.sql";
+		@unlink($file);
+		$ret = $this->kopia(['restore', $snap['sources']['db'] . "/{$db}.sql", $file], false);
+		if (!$ret['success'] || !is_file($file)) {
+			$this->log('FAILED: ' . trim($ret['stderr']));
+			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
+		}
+		$this->log('dump restored: ' . self::human((int)filesize($file)));
+
+		$afi = \apnscpFunctionInterceptor::factory(\Auth::context(null, $this->site));
+		if ($mode === 'new') {
+			$target = $db . '_r' . date('md_Hi');
+			if (!$afi->mysql_create_database($target)) {
+				throw new \RuntimeException("could not create database {$target}");
+			}
+			$this->log("created database {$target}");
+		} else {
+			$target = $db;
+			if (!$afi->mysql_database_exists($target)) {
+				throw new \RuntimeException("live database {$target} no longer exists; restore into a new one instead");
+			}
+			$this->log("replacing live database {$target}");
+		}
+
+		$t = microtime(true);
+		$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'mysql --defaults-extra-file=%(cnf)s %(db)s < %(file)s'", [
+			'cnf' => '/root/.my.cnf', 'db' => $target, 'file' => $file,
+		]);
+		@unlink($file);
+		if (!$ret['success']) {
+			$this->log('import FAILED: ' . trim($ret['stderr']));
+			throw new \RuntimeException("mysql import into {$target}: " . trim($ret['stderr']));
+		}
+		$this->log(sprintf('imported into %s in %.1fs', $target, microtime(true) - $t));
+
+		return $target;
+	}
+
+	private function findRun(string $run): array
+	{
+		foreach ($this->listSnapshots(1000) as $r) {
+			if ($r['run'] === $run) {
+				return $r;
+			}
+		}
+		throw new \RuntimeException("no snapshot run {$run}");
+	}
+
+	private function adminUser(): string
+	{
+		$admin = (string)(new SiteConfiguration($this->site))->getServiceValue('siteinfo', 'admin_user');
+		if ($admin === '') {
+			throw new \RuntimeException("{$this->site}: no admin_user");
+		}
+
+		return $admin;
+	}
+
+	/**
+	 * ~/restore inside the site, as the host sees it
+	 */
+	private function restoreRoot(): string
+	{
+		return FILESYSTEM_VIRTBASE . "/{$this->site}/fst/home/" . $this->adminUser() . '/restore';
+	}
+
+	/**
+	 * Host path translated to what the site owner sees over SSH/SFTP
+	 */
+	private function visiblePath(string $hostPath): string
+	{
+		$prefix = FILESYSTEM_VIRTBASE . "/{$this->site}/fst";
+
+		return str_starts_with($hostPath, $prefix) ? substr($hostPath, strlen($prefix)) : $hostPath;
+	}
+
+	private function chownToAdmin(string $root, string $leaf): void
+	{
+		$pwd = (new \Opcenter\Role\User())->getpwnam($this->adminUser());
+		if (empty($pwd['uid'])) {
+			return;
+		}
+		// only the directories this restore created, not the restored content (which keeps its owners)
+		for ($dir = $leaf; str_starts_with($dir, $root); $dir = dirname($dir)) {
+			if (fileowner($dir) === 0) {
+				chown($dir, (int)$pwd['uid']);
+				chgrp($dir, (int)$pwd['gid']);
+			}
+			if ($dir === $root) {
+				break;
+			}
+		}
+	}
+
+	private function openLog(string $kind): void
+	{
+		if (!is_dir("{$this->stateDir}/logs")) {
+			mkdir("{$this->stateDir}/logs", 0700, true);
+		}
+		$this->logFile = "{$this->stateDir}/logs/{$kind}-" . date('Ymd-His') . '.log';
+	}
+
 	private function log(string $line): void
 	{
 		if ($this->logFile) {
@@ -462,7 +693,7 @@ class Runner
 	public static function listLogs(string $site): array
 	{
 		$out = [];
-		foreach (glob(self::STATE_DIR . "/{$site}/logs/{run,verify}-*.log", GLOB_BRACE) ?: [] as $f) {
+		foreach (glob(self::STATE_DIR . "/{$site}/logs/{run,verify,restore}-*.log", GLOB_BRACE) ?: [] as $f) {
 			$out[] = ['name' => basename($f), 'size' => (int)filesize($f), 'mtime' => (int)filemtime($f)];
 		}
 		usort($out, static fn($a, $b) => strcmp($b['name'], $a['name']));
@@ -472,7 +703,7 @@ class Runner
 
 	public static function readLog(string $site, string $name, int $maxBytes = 262144): ?string
 	{
-		if (!preg_match('/^(run|verify)-\d{8}-\d{6}\.log$/', $name)) {
+		if (!preg_match('/^(run|verify|restore)-\d{8}-\d{6}\.log$/', $name)) {
 			return null;
 		}
 		$f = self::STATE_DIR . "/{$site}/logs/{$name}";
