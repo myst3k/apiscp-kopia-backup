@@ -16,6 +16,7 @@ class Page extends Page_Container
 		'default_retention'     => 'No default retention',
 		'lifecycle'             => 'Lifecycle rule',
 		'delete_version_denied' => 'Key denied DeleteObjectVersion',
+		'bypass_governance_denied' => 'Key cannot delete locked versions',
 	];
 
 	protected ?array $testResults = null;

@@ -53,6 +53,9 @@ class BucketCheck
 		$results['delete_version_denied'] = $results['default_retention']['status'] === self::PASS
 			? $this->checkDeleteVersionDenied()
 			: $this->result(self::SKIP, 'requires no default retention');
+		$results['bypass_governance_denied'] = $results['object_lock']['status'] === self::PASS
+			? $this->checkBypassGovernanceDenied()
+			: $this->result(self::SKIP, 'requires object lock');
 
 		return $results;
 	}
@@ -205,6 +208,51 @@ class BucketCheck
 		}
 
 		return $this->result(self::PASS, 'key denied DeleteObjectVersion');
+	}
+
+	/**
+	 * Lock a probe for one day in GOVERNANCE mode, then try to delete it with the bypass flag
+	 */
+	private function checkBypassGovernanceDenied(): array
+	{
+		$key = $this->prefix . '.kopia-backup-probe/' . bin2hex(random_bytes(8));
+		try {
+			$version = $this->s3->putObject([
+				'Bucket'                    => $this->bucket,
+				'Key'                       => $key,
+				'Body'                      => 'probe',
+				'ObjectLockMode'            => 'GOVERNANCE',
+				'ObjectLockRetainUntilDate' => new \DateTimeImmutable('+1 day'),
+			])['VersionId'] ?? null;
+		} catch (S3Exception $e) {
+			return $this->result(self::FAIL, 'locked probe write failed: ' . $this->awsError($e));
+		}
+		if (!$version) {
+			return $this->result(self::FAIL, 'probe write returned no VersionId');
+		}
+
+		try {
+			$this->s3->deleteObject([
+				'Bucket'                    => $this->bucket,
+				'Key'                       => $key,
+				'VersionId'                 => $version,
+				'BypassGovernanceRetention' => true,
+			]);
+
+			return $this->result(self::FAIL, 'key deleted a locked version; remove s3:BypassGovernanceRetention and s3:DeleteObjectVersion');
+		} catch (S3Exception $e) {
+			if ($e->getAwsErrorCode() !== 'AccessDenied') {
+				return $this->result(self::FAIL, 'unexpected delete error: ' . $this->awsError($e));
+			}
+		}
+
+		// the locked version expires in a day; the lifecycle rule removes it afterwards
+		try {
+			$this->s3->deleteObject(['Bucket' => $this->bucket, 'Key' => $key]);
+		} catch (S3Exception) {
+		}
+
+		return $this->result(self::PASS, 'locked version could not be deleted');
 	}
 
 	private function result(string $status, string $detail): array
