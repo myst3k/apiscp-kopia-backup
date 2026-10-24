@@ -9,7 +9,7 @@ class Page extends Page_Container
 {
 	public const FIELDS = [
 		'endpoint', 'region', 'bucket', 'prefix', 'access_key', 'secret_key', 'lock_mode', 'lock_days', 'keep_days',
-		'kopia_updates',
+		'kopia_version',
 	];
 
 	public const GROUPS = [
@@ -106,9 +106,9 @@ class Page extends Page_Container
 		return (array)$this->kopiabackup_get_settings();
 	}
 
-	public function getKopiaVersion(): ?string
+	public function getKopiaVersions(): array
 	{
-		return $this->kopiabackup_kopia_version();
+		return (array)$this->kopiabackup_kopia_versions() + ['installed' => null, 'latest' => null, 'available' => []];
 	}
 
 	public function getTestResults(): ?array

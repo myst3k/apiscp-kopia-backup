@@ -15,7 +15,7 @@ ansible-playbook addin.yml --extra-vars=addin=kopia-backup
 
 Update with `git -C /usr/local/apnscp/resources/playbooks/addins/kopia-backup pull` and the same `ansible-playbook` line.
 
-The menu is cached per session, so log out and back in to see the link. The add-in hooks itself into `roles/custom/installed`, so `upcp -b` re-runs it. Whether that upgrades Kopia or holds the installed version is set on the admin page (**Kopia → Updates**).
+The menu is cached per session, so log out and back in to see the link. The add-in hooks itself into `roles/custom/installed`, so `upcp -b` re-runs it. Whether that upgrades Kopia or holds the installed version is set on the admin page (**Kopia** tab: latest or an exact version).
 
 ## Bucket
 

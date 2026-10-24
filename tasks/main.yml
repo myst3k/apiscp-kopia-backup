@@ -12,22 +12,23 @@
     gpgcheck: yes
     gpgkey: https://kopia.io/signing-key
 
-# the admin page stores kopia_updates: latest|hold; absent file or key means latest
+# the admin page stores kopia_version: latest or an exact version; absent file or key means latest
 - name: Read plugin settings
   slurp:
     src: "{{ apnscp_root }}/config/custom/kopia-backup/settings.yaml"
   register: _kb_settings
   failed_when: false
 
-- name: Decide Kopia update policy
+- name: Decide Kopia version
   set_fact:
-    kopia_updates: "{{ ((_kb_settings.content | default('') | b64decode | from_yaml) or {}).get('kopia_updates', 'latest') }}"
+    kopia_version: "{{ ((_kb_settings.content | default('') | b64decode | from_yaml) or {}).get('kopia_version', 'latest') }}"
 
 # kopia is a static binary with no deps; limiting repos keeps a broken third-party repo key from failing the run
-- name: Install Kopia ({{ kopia_updates }})
+- name: Install Kopia ({{ kopia_version }})
   dnf:
-    name: kopia
-    state: "{{ 'latest' if kopia_updates == 'latest' else 'present' }}"
+    name: "{{ 'kopia' if kopia_version == 'latest' else 'kopia-' ~ kopia_version }}"
+    state: "{{ 'latest' if kopia_version == 'latest' else 'present' }}"
+    allow_downgrade: yes
     disablerepo: "*"
     enablerepo: kopia
 

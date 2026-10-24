@@ -43,19 +43,54 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
-	 * Installed Kopia version
+	 * Installed Kopia version plus what the repo offers
+	 *
+	 * @return array{installed: ?string, latest: ?string, available: string[]}
 	 */
-	public function kopia_version(): ?string
+	public function kopia_versions(): array
 	{
 		if (!IS_CLI) {
-			return $this->query('kopiabackup_kopia_version');
+			return $this->query('kopiabackup_kopia_versions');
 		}
+		$installed = null;
 		$ret = \Util_Process_Safe::exec(['kopia', '--version']);
-		if (!$ret['success']) {
-			return null;
+		if ($ret['success']) {
+			$installed = strtok(trim($ret['stdout']), ' ') ?: null;
 		}
+		$available = $this->availableKopiaVersions();
 
-		return strtok(trim($ret['stdout']), ' ') ?: null;
+		return ['installed' => $installed, 'latest' => $available[0] ?? null, 'available' => $available];
+	}
+
+	/**
+	 * Versions in the Kopia repo, newest first, cached for an hour since dnf may refresh metadata
+	 */
+	private function availableKopiaVersions(): array
+	{
+		$cache = '/var/cache/kopia-backup/versions.json';
+		if (is_file($cache) && filemtime($cache) > time() - 3600) {
+			return (array)json_decode((string)file_get_contents($cache), true);
+		}
+		// "dnf list" output is parsed rather than repoquery --qf because the % in a query format
+		// collides with Util_Process's printf-style argument handling
+		$ret = \Util_Process_Safe::exec(['dnf', '-q', '--disablerepo=*', '--enablerepo=kopia', 'list', '--available', '--showduplicates', 'kopia']);
+		if (!$ret['success']) {
+			warn('could not query Kopia repo: %s', trim($ret['stderr']));
+
+			return [];
+		}
+		$versions = [];
+		foreach (preg_split('/\R/', $ret['stdout']) as $line) {
+			$cols = preg_split('/\s+/', trim($line));
+			if (str_starts_with($cols[0], 'kopia.') && isset($cols[1])) {
+				$versions[] = strtok($cols[1], '-');
+			}
+		}
+		$versions = array_values(array_unique($versions));
+		usort($versions, static fn($a, $b) => version_compare($b, $a));
+		file_put_contents($cache, json_encode($versions));
+
+		return $versions;
 	}
 
 	/**

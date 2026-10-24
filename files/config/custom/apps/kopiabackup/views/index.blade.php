@@ -1,27 +1,19 @@
 @php
 	$s = $Page->getSettings();
-	$version = $Page->getKopiaVersion();
+	$kopia = $Page->getKopiaVersions();
+	$kopiaTab = isset($_POST['kopia_version']);
 	$results = $Page->getTestResults();
 	$badge = ['pass' => 'success', 'fail' => 'danger', 'skip' => 'secondary'];
 	$setupTab = isset($_GET['tab']) && $_GET['tab'] === 'setup';
+	$settingsTab = !$setupTab && !$kopiaTab;
 @endphp
-
-<div class="row mb-3">
-	<div class="col-12">
-		<h5>
-			Kopia
-			@if ($version)
-				<span class="badge badge-success">{{ $version }}</span>
-			@else
-				<span class="badge badge-danger">not installed</span>
-			@endif
-		</h5>
-	</div>
-</div>
 
 <ul class="nav nav-tabs mb-3" role="tablist">
 	<li class="nav-item">
-		<a class="nav-link {{ $setupTab ? '' : 'active' }}" data-toggle="tab" href="#tab-settings" role="tab">Settings</a>
+		<a class="nav-link {{ $settingsTab ? 'active' : '' }}" data-toggle="tab" href="#tab-settings" role="tab">Settings</a>
+	</li>
+	<li class="nav-item">
+		<a class="nav-link {{ $kopiaTab ? 'active' : '' }}" data-toggle="tab" href="#tab-kopia" role="tab">Kopia</a>
 	</li>
 	<li class="nav-item">
 		<a class="nav-link {{ $setupTab ? 'active' : '' }}" data-toggle="tab" href="#tab-setup" role="tab">Bucket setup</a>
@@ -29,7 +21,7 @@
 </ul>
 
 <div class="tab-content">
-<div class="tab-pane {{ $setupTab ? '' : 'active' }}" id="tab-settings" role="tabpanel">
+<div class="tab-pane {{ $settingsTab ? 'active' : '' }}" id="tab-settings" role="tabpanel">
 <form method="post">
 	<input type="hidden" name="{{ \Auth_UI::CSRF_KEY }}" value="{{ \Session::token() }}"/>
 	<h4>Storage</h4>
@@ -62,18 +54,6 @@
 		</div>
 		<div class="col-12">
 			<small class="form-text text-muted mb-3">Save the bucket first, then create the key from the policy on the <a href="#tab-setup" onclick="document.querySelector('.nav-tabs a[href=\'#tab-setup\']').click();return false">Bucket setup</a> tab.</small>
-		</div>
-	</div>
-
-	<h4>Kopia</h4>
-	<div class="row">
-		<div class="form-group col-md-6">
-			<label for="kopia_updates">Updates</label>
-			<select class="form-control custom-select" id="kopia_updates" name="kopia_updates">
-				<option value="latest" {{ $s['kopia_updates'] === 'latest' ? 'selected' : '' }}>Install the latest release on every Bootstrapper run</option>
-				<option value="hold" {{ $s['kopia_updates'] === 'hold' ? 'selected' : '' }}>Hold the installed version{{ $version ? " ({$version})" : '' }}</option>
-			</select>
-			<small class="form-text text-muted">Applied the next time <code>upcp -b</code> or the add-in runs.</small>
 		</div>
 	</div>
 
@@ -146,6 +126,31 @@
 		</table>
 	@endforeach
 @endif
+</div>
+
+<div class="tab-pane {{ $kopiaTab ? 'active' : '' }}" id="tab-kopia" role="tabpanel">
+<form method="post">
+	<input type="hidden" name="{{ \Auth_UI::CSRF_KEY }}" value="{{ \Session::token() }}"/>
+	<table class="table table-sm w-auto mb-3">
+		<tbody>
+			<tr><th class="pr-4">Installed</th><td>{{ $kopia['installed'] ?? 'not installed' }}</td></tr>
+			<tr><th class="pr-4">Latest</th><td>{{ $kopia['latest'] ?? 'unknown' }}</td></tr>
+		</tbody>
+	</table>
+	<div class="form-group col-md-4 px-0">
+		<label for="kopia_version">Version to install</label>
+		<input type="text" class="form-control" id="kopia_version" name="kopia_version" list="kopia-versions"
+		       value="{{ $s['kopia_version'] }}" pattern="latest|\d+\.\d+\.\d+" required/>
+		<datalist id="kopia-versions">
+			<option value="latest">latest</option>
+			@foreach ($kopia['available'] as $v)
+				<option value="{{ $v }}">{{ $v }}</option>
+			@endforeach
+		</datalist>
+		<small class="form-text text-muted">Applied on the next <code>upcp -b</code> or add-in run.</small>
+	</div>
+	<button type="submit" name="save" value="1" class="btn btn-primary">Save</button>
+</form>
 </div>
 
 <div class="tab-pane {{ $setupTab ? 'active' : '' }}" id="tab-setup" role="tabpanel">
