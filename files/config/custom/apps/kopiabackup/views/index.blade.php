@@ -56,7 +56,11 @@
 				<input type="hidden" name="manage_site" value="{{ $editSite }}"/>
 				<div class="d-flex align-items-center mb-4">
 					<button type="submit" name="close_site" value="1" class="btn btn-secondary mr-3">&larr; All sites</button>
-					<h4 class="mb-0">{{ $editSite }}</h4>
+					<h4 class="mb-0">{{ $editSite }}
+						@if ($st && $st['running'])<span class="badge badge-info align-middle">running</span>@endif
+						@if ($st && $st['verifying'])<span class="badge badge-info align-middle">verifying</span>@endif
+						@if ($st && $st['restoring'])<span class="badge badge-info align-middle">restoring</span>@endif
+					</h4>
 					<div class="ml-auto">
 						<button type="submit" name="backup" value="{{ $editSite }}" class="btn btn-primary" {{ !$st || $st['running'] ? 'disabled' : '' }}>Back up now</button>
 						<button type="submit" name="verify" value="{{ $editSite }}" class="btn btn-secondary" {{ !$st || $st['running'] || $st['verifying'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
@@ -214,6 +218,9 @@
 									@endif
 									@if ($st['verifying'])
 										<span class="badge badge-info">verifying</span>
+									@endif
+									@if ($st['restoring'])
+										<span class="badge badge-info">restoring</span>
 									@endif
 								</td>
 								<td class="kb-snapshots">
