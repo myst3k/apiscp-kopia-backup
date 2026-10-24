@@ -70,7 +70,8 @@ Enter the settings on the admin page, then **Save & test bucket**. CLI equivalen
 
 - **Sites** section of the admin page: last run per site, **Back up now** per site, and **Back up all sites**, each queued as a panel job.
 - **Kopia** section: how many sites run at once (default 2) and the nightly timer toggle (02:30). Each site runs in its own `cpcmd` process under `nice`/`ionice`.
-- CLI: `cpcmd kopiabackup:run smokinbearcigars.com`, `cpcmd kopiabackup:run-all`, `cpcmd kopiabackup:status`.
+- **Verify** per site or **Verify all sites**: `kopia snapshot verify` (every referenced object must exist; a configurable percentage of file contents is downloaded and re-hashed) plus a sample of object-lock retention read back from the bucket. Also runs weekly after the nightly backup on the configured day.
+- CLI: `cpcmd kopiabackup:run <site>`, `run-all`, `verify <site>`, `verify-all`, `verify-locks <site>`, `status`.
 
 Every repository password derives from one master secret created on first run and kept in the ApisCP keyring. The **Recovery** section shows the full kit (master, derivation, bucket details, and the `kopia` commands to read a repo from any machine); store it in a password manager. Without the master nothing in the bucket can be read. On a rebuilt server: `cpcmd kopiabackup:import-master <master>`.
 

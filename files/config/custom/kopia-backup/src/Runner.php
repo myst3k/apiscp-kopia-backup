@@ -87,25 +87,52 @@ class Runner
 	}
 
 	/**
-	 * Last report plus whether a run holds the lock right now
+	 * Integrity check: every object referenced by every snapshot must exist, and a random
+	 * percentage of file contents is downloaded and re-hashed.
+	 *
+	 * @return array{ok: bool, output: string}
+	 */
+	public function verify(int $percent): array
+	{
+		$this->ensureRepo(false);
+		$ret = $this->kopia(['snapshot', 'verify', '--verify-files-percent', (string)max(0, min(100, $percent))], false, true);
+		$lines = preg_split('/\R/', trim($ret['stderr'] . "\n" . $ret['stdout']));
+
+		return ['ok' => $ret['success'], 'output' => implode("\n", array_slice(array_filter($lines), -15))];
+	}
+
+	public static function saveVerify(string $site, array $report): void
+	{
+		$dir = self::STATE_DIR . "/{$site}";
+		if (is_dir($dir)) {
+			file_put_contents("{$dir}/verify.json", json_encode($report, JSON_PRETTY_PRINT));
+		}
+	}
+
+	/**
+	 * Last backup and verification reports plus whether a run holds the lock right now
 	 */
 	public static function status(string $site): array
 	{
 		$dir = self::STATE_DIR . "/{$site}";
 		$last = is_file("{$dir}/last.json") ? (array)json_decode((string)file_get_contents("{$dir}/last.json"), true) : [];
+		$verify = is_file("{$dir}/verify.json") ? (array)json_decode((string)file_get_contents("{$dir}/verify.json"), true) : [];
 		$running = false;
 		if (is_file("{$dir}/lock") && ($fh = fopen("{$dir}/lock", 'r'))) {
 			$running = !flock($fh, LOCK_EX | LOCK_NB);
 			fclose($fh);
 		}
 
-		return $last + ['running' => $running, 'ok' => null, 'finished' => null];
+		return $last + ['running' => $running, 'ok' => null, 'finished' => null, 'verify' => $verify];
 	}
 
-	private function ensureRepo(): void
+	private function ensureRepo(bool $create = true): void
 	{
 		if (is_file("{$this->stateDir}/kopia.config") && $this->kopia(['repository', 'status'], false)['success']) {
 			return;
+		}
+		if (!$create) {
+			throw new \RuntimeException("{$this->domain}: no repository connected; run a backup first");
 		}
 		$s3 = [
 			's3',

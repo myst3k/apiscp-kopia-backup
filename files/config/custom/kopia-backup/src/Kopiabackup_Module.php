@@ -203,11 +203,11 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
-	 * Back up every active site, N at a time (the "parallel" setting). Each site runs in its own
-	 * cpcmd process so one failure cannot take the rest down, and the per-site lock prevents overlap
-	 * with a Back up now job.
+	 * Back up every active site, N at a time (the "parallel" setting), then on the configured
+	 * weekday verify each one. Each site runs in its own cpcmd process so one failure cannot take
+	 * the rest down, and the per-site lock prevents overlap with a Back up now job.
 	 *
-	 * @return array site => ok|failed
+	 * @return array site => ok|failed, plus verify results under 'verify' on verification days
 	 */
 	public function run_all(): array
 	{
@@ -218,8 +218,47 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if ($missing = Settings::missing($s)) {
 			return error('missing settings: %s', implode(', ', $missing));
 		}
-		$parallel = max(1, (int)$s['parallel']);
-		$pending = Enumerate::active();
+		$sites = Enumerate::active();
+		$out = $this->pool($sites, 'kopiabackup:run', (int)$s['parallel']);
+		if ($failed = array_keys($out, 'failed', true)) {
+			error('backup failed for: %s', implode(', ', $failed));
+		}
+		if ($s['verify_day'] !== 'never' && (int)date('w') === (int)$s['verify_day']) {
+			$out['verify'] = $this->pool($sites, 'kopiabackup:verify', (int)$s['parallel']);
+			if ($failed = array_keys($out['verify'], 'failed', true)) {
+				error('verification failed for: %s', implode(', ', $failed));
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Verify every site now
+	 */
+	public function verify_all(): array
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_verify_all');
+		}
+		$s = Settings::load();
+		$out = $this->pool(Enumerate::active(), 'kopiabackup:verify', (int)$s['parallel']);
+		if ($failed = array_keys($out, 'failed', true)) {
+			error('verification failed for: %s', implode(', ', $failed));
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Run a cpcmd subcommand for each site, $parallel at a time
+	 *
+	 * @return array site => ok|failed
+	 */
+	private function pool(array $sites, string $command, int $parallel): array
+	{
+		$parallel = max(1, $parallel);
+		$pending = $sites;
 		$running = [];
 		$out = [];
 		$cmd = INCLUDE_PATH . '/bin/cmd';
@@ -227,10 +266,10 @@ class Kopiabackup_Module extends \Module_Skeleton
 			while ($pending && count($running) < $parallel) {
 				$site = array_shift($pending);
 				$pipes = [];
-				$proc = proc_open([$cmd, 'kopiabackup:run', $site], [1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']], $pipes);
+				$proc = proc_open([$cmd, $command, $site], [1 => ['file', '/dev/null', 'w'], 2 => ['pipe', 'w']], $pipes);
 				if (!is_resource($proc)) {
 					$out[$site] = 'failed';
-					warn('%s: could not start backup process', $site);
+					warn('%s: could not start %s', $site, $command);
 					continue;
 				}
 				stream_set_blocking($pipes[2], false);
@@ -246,7 +285,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 				proc_close($r['proc']);
 				$out[$site] = $status['exitcode'] === 0 ? 'ok' : 'failed';
 				if ($status['exitcode'] !== 0) {
-					warn('%s: %s', $site, trim($r['buf']) ?: "exit {$status['exitcode']}");
+					warn('%s %s: %s', $command, $site, trim($r['buf']) ?: "exit {$status['exitcode']}");
 				}
 				unset($running[$site]);
 			}
@@ -255,11 +294,72 @@ class Kopiabackup_Module extends \Module_Skeleton
 				usleep(500000);
 			}
 		}
-		if ($failed = array_keys($out, 'failed', true)) {
-			error('backup failed for: %s', implode(', ', $failed));
-		}
 
 		return $out;
+	}
+
+	/**
+	 * Integrity check of a site's snapshots (kopia snapshot verify) plus the object-lock sample
+	 *
+	 * @param string   $site    domain or siteN
+	 * @param int|null $percent file contents to download and re-hash; default from settings
+	 */
+	public function verify(string $site, ?int $percent = null): array|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_verify', $site, $percent);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		if ($missing = Settings::missing($s)) {
+			return error('missing settings: %s', implode(', ', $missing));
+		}
+		$report = ['site' => "site{$id}", 'started' => time(), 'ok' => false];
+		try {
+			$runner = new Runner($s, "site{$id}", $this->master());
+			$report['domain'] = $runner->domain();
+			$report['integrity'] = $runner->verify($percent ?? (int)$s['verify_percent']);
+		} catch (\Throwable $e) {
+			$report['integrity'] = ['ok' => false, 'output' => $e->getMessage()];
+		}
+		$locks = $this->verify_locks($site);
+		$report['locks'] = is_array($locks) ? $locks : null;
+		$report['ok'] = !empty($report['integrity']['ok'])
+			&& is_array($locks) && !$locks['unlocked'] && !$locks['wrong_mode'] && !$locks['short'];
+		$report['finished'] = time();
+		Runner::saveVerify("site{$id}", $report);
+		if (!$report['ok']) {
+			error('%s: verification failed', $report['domain'] ?? $site);
+		} else {
+			info('%s: snapshots verified, locks confirmed', $report['domain']);
+		}
+
+		return $report;
+	}
+
+	public function schedule_verify(string $site): bool
+	{
+		if (null === \Auth::get_site_id_from_anything($site)) {
+			return error("unknown site `%s'", $site);
+		}
+		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_verify', $site);
+		$job->timeout = 6 * 3600;
+		$job->setTags(['kopia-verify', $site]);
+		$job->dispatch();
+
+		return info('verification queued for %s', $site);
+	}
+
+	public function schedule_verify_all(): bool
+	{
+		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_verify_all');
+		$job->timeout = 12 * 3600;
+		$job->setTags(['kopia-verify', 'all sites']);
+		$job->dispatch();
+
+		return info('verification of all sites queued');
 	}
 
 	/**
@@ -317,6 +417,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'size'      => $size,
 				'databases' => count((array)($st['databases'] ?? [])),
 				'error'     => $st['error'] ?? null,
+				'verified'  => $st['verify']['finished'] ?? null,
+				'verify_ok' => $st['verify']['ok'] ?? null,
 			];
 		}
 

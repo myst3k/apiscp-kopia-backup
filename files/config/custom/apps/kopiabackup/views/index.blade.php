@@ -44,11 +44,12 @@
 			@endif
 			<div class="mb-3">
 				<button type="submit" name="backup_all" value="1" class="btn btn-primary" {{ $s['bucket'] ? '' : 'disabled' }}>Back up all sites</button>
+				<button type="submit" name="verify_all" value="1" class="btn btn-secondary" {{ $s['bucket'] ? '' : 'disabled' }}>Verify all sites</button>
 				<span class="text-muted ml-2">{{ (int)$s['parallel'] }} at a time, queued as one job</span>
 			</div>
 			<table class="table">
 				<thead>
-					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Databases</th><th>Size</th><th></th></tr>
+					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Databases</th><th>Size</th><th>Verified</th><th></th></tr>
 				</thead>
 				<tbody>
 					@foreach ($sites as $siteId => $st)
@@ -66,15 +67,25 @@
 							</td>
 							<td>{{ $st['finished'] ? $st['databases'] : '' }}</td>
 							<td>{{ $st['size'] ? \Formatter::reduceBytes($st["size"]) : '' }}</td>
-							<td class="text-right">
+							<td>
+								@if ($st['verified'])
+									{{ date('M j', $st['verified']) }}
+									<span class="badge badge-{{ $st['verify_ok'] ? 'success' : 'danger' }}">{{ $st['verify_ok'] ? 'ok' : 'failed' }}</span>
+								@endif
+							</td>
+							<td class="text-right text-nowrap">
 								<button type="submit" name="backup" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
 									{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
+								<button type="submit" name="verify" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
+									{{ $st['running'] || !$st['finished'] ? 'disabled' : '' }}>Verify</button>
 							</td>
 						</tr>
 					@endforeach
 				</tbody>
 			</table>
-			<p class="text-muted">Back up now queues a job; watch it in the job indicator at the top of the panel.</p>
+			<p class="text-muted">Buttons queue jobs; watch them in the job indicator at the top of the panel.
+				Verify runs <code>kopia snapshot verify</code> (every object referenced by every snapshot must exist, {{ (int)$s['verify_percent'] }}% of file contents re-downloaded and hashed)
+				and reads the object-lock retention Wasabi reports on a sample of the repository.</p>
 		</div>
 
 		<div class="tab-pane" id="storage" role="tabpanel">
@@ -199,6 +210,22 @@
 					@endforeach
 				</select>
 				<small class="form-text text-muted">Used by Back up all sites and the nightly timer.</small>
+			</div>
+			<div class="row">
+				<div class="form-group col-md-4">
+					<label for="verify_day">Weekly verification</label>
+					<select class="form-control custom-select" id="verify_day" name="verify_day">
+						@foreach (['never' => 'Never', '0' => 'Sunday', '1' => 'Monday', '2' => 'Tuesday', '3' => 'Wednesday', '4' => 'Thursday', '5' => 'Friday', '6' => 'Saturday'] as $v => $label)
+							<option value="{{ $v }}" {{ (string)$s['verify_day'] === $v ? 'selected' : '' }}>{{ $label }}</option>
+						@endforeach
+					</select>
+					<small class="form-text text-muted">Runs after that night's backups.</small>
+				</div>
+				<div class="form-group col-md-4">
+					<label for="verify_percent">File contents re-checked (%)</label>
+					<input type="number" min="0" max="100" class="form-control" id="verify_percent" name="verify_percent" value="{{ $s['verify_percent'] }}"/>
+					<small class="form-text text-muted">Downloaded and re-hashed. 100 reads the whole repository.</small>
+				</div>
 			</div>
 			<input type="hidden" name="timer_form" value="1"/>
 			<div class="form-group custom-control custom-checkbox">

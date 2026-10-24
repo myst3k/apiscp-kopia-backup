@@ -22,6 +22,9 @@ class Settings
 		'kopia_version' => 'latest',
 		// sites backed up at the same time by run-all and the nightly timer
 		'parallel'      => 2,
+		// weekly integrity + lock verification after the nightly run: day of week 0-6, or never
+		'verify_day'     => '0',
+		'verify_percent' => 2,
 	];
 
 	private const SECRETS = ['secret_key'];
@@ -145,6 +148,19 @@ class Settings
 		}
 		$value = trim((string)$value);
 		switch ($key) {
+			case 'verify_day':
+				$value = strtolower($value);
+				if ($value !== 'never' && !preg_match('/^[0-6]$/', $value)) {
+					return $fail('verify_day must be 0-6 or never');
+				}
+
+				return $value;
+			case 'verify_percent':
+				if (!ctype_digit($value) || (int)$value > 100) {
+					return $fail('verify_percent must be 0-100');
+				}
+
+				return (int)$value;
 			case 'parallel':
 				if (!ctype_digit($value) || (int)$value < 1 || (int)$value > 8) {
 					return $fail('parallel must be between 1 and 8');
