@@ -550,16 +550,20 @@ class Kopiabackup_Module extends \Module_Skeleton
 	 * @param string $run     run tag from kopiabackup:snapshots
 	 * @param string $subpath path inside the site, empty for everything
 	 */
-	public function restore_files(string $site, string $run, string $subpath = ''): bool
+	/**
+	 * @param string $where       copy (into ~/restore/<date>) or live (back in place)
+	 * @param bool   $deleteExtra live only: remove files under the path that are not in the snapshot
+	 */
+	public function restore_files(string $site, string $run, string $subpath = '', string $where = 'copy', bool $deleteExtra = false): bool
 	{
 		if (!IS_CLI) {
-			return $this->query('kopiabackup_restore_files', $site, $run, $subpath);
+			return $this->query('kopiabackup_restore_files', $site, $run, $subpath, $where, $deleteExtra);
 		}
 		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
 			return error("unknown site `%s'", $site);
 		}
 
-		return $this->startUnit("restore-files-site{$id}", ['kopiabackup:restore_files_now', "site{$id}", $run, $subpath])
+		return $this->startUnit("restore-files-site{$id}", ['kopiabackup:restore_files_now', "site{$id}", $run, $subpath, $where, $deleteExtra ? '1' : '0'])
 			&& success('file restore for %s started; the result appears in its log under Manage', $site);
 	}
 
@@ -586,17 +590,17 @@ class Kopiabackup_Module extends \Module_Skeleton
 	 *
 	 * @return string|bool path written, as the site owner sees it
 	 */
-	public function restore_files_now(string $site, string $run, string $subpath = ''): string|bool
+	public function restore_files_now(string $site, string $run, string $subpath = '', string $where = 'copy', string|bool $deleteExtra = false): string|bool
 	{
 		if (!IS_CLI) {
-			return $this->query('kopiabackup_restore_files_now', $site, $run, $subpath);
+			return $this->query('kopiabackup_restore_files_now', $site, $run, $subpath, $where, $deleteExtra);
 		}
 		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
 			return error("unknown site `%s'", $site);
 		}
 		$s = Settings::load();
 		try {
-			$path = (new Runner($s, "site{$id}", $this->master()))->restoreFiles($run, $subpath);
+			$path = (new Runner($s, "site{$id}", $this->master()))->restoreFiles($run, $subpath, $where, in_array($deleteExtra, [true, '1', 1, 'true'], true));
 		} catch (\Throwable $e) {
 			return error('%s: %s', $site, $e->getMessage());
 		}

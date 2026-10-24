@@ -230,7 +230,19 @@ class Page extends Page_Container
 			return error('no site selected');
 		}
 
-		return $this->kopiabackup_restore_files($this->editSite, (string)($params['restore_run'] ?? ''), (string)($params['restore_path'] ?? ''));
+		$what = (string)($params['restore_what'] ?? '');
+		$path = $what === 'custom' ? (string)($params['restore_custom_path'] ?? '') : $what;
+		if ($what === 'custom' && trim($path, '/') === '') {
+			return error('enter the folder to restore');
+		}
+
+		return $this->kopiabackup_restore_files(
+			$this->editSite,
+			(string)($params['restore_run'] ?? ''),
+			$path,
+			($params['restore_where'] ?? 'copy') === 'live' ? 'live' : 'copy',
+			!empty($params['restore_delete_extra'])
+		);
 	}
 
 	public function handleRestoreDb(array $params): bool

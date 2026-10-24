@@ -493,35 +493,86 @@ class Runner
 	 * @param string $subpath path inside the site, e.g. var/www/html/wp-content/uploads; empty for everything
 	 * @return string path the files were written to
 	 */
-	public function restoreFiles(string $run, string $subpath): string
+	/**
+	 * @param string $where       copy: into ~/restore/<date>/<subpath>; live: back onto the site at the same paths
+	 * @param bool   $deleteExtra live only: also remove files under the path that are not in the snapshot
+	 */
+	public function restoreFiles(string $run, string $subpath, string $where = 'copy', bool $deleteExtra = false): string
 	{
 		$subpath = trim($subpath, '/');
-		if ($subpath !== '' && (str_contains($subpath, '..') || !preg_match('!^[A-Za-z0-9._@/-]+$!', $subpath))) {
+		if ($subpath !== '' && (str_contains($subpath, '..') || !preg_match('~^[A-Za-z0-9._@/-]+$~', $subpath))) {
 			throw new \RuntimeException("invalid path `{$subpath}'");
+		}
+		if (!in_array($where, ['copy', 'live'], true)) {
+			throw new \RuntimeException('where must be copy or live');
 		}
 		$snap = $this->findRun($run);
 		if (empty($snap['sources']['files'])) {
 			throw new \RuntimeException("run {$run} has no file snapshot");
 		}
 		$this->openLog('restore');
-		$this->log("restore files from run {$run} (" . date('Y-m-d H:i', $snap['time']) . "), path: " . ($subpath ?: '(entire site)'));
+		$this->log(sprintf('restore files from run %s (%s): %s, %s%s', $run, date('Y-m-d H:i', $snap['time']),
+			$subpath ?: '(entire site)', $where === 'live' ? 'in place' : 'copy to ~/restore', $deleteExtra ? ', removing files not in snapshot' : ''));
 
-		$target = $this->restoreRoot() . '/' . date('Ymd-His') . ($subpath !== '' ? "/{$subpath}" : '');
+		if ($where === 'live') {
+			$target = FILESYSTEM_VIRTBASE . "/{$this->site}/fst" . ($subpath !== '' ? "/{$subpath}" : '');
+		} else {
+			$target = $this->restoreRoot() . '/' . date('Ymd-His') . ($subpath !== '' ? "/{$subpath}" : '');
+		}
 		if (!is_dir($target) && !mkdir($target, 0750, true)) {
 			throw new \RuntimeException("cannot create {$target}");
 		}
 		$t = microtime(true);
 		$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
-		$ret = $this->kopia(['restore', '--parallel', '16', $source, $target], false);
+		$args = ['restore', '--parallel', '16'];
+		if ($where === 'live' && $deleteExtra) {
+			$args[] = '--delete-extra';
+		}
+		$ret = $this->kopia(array_merge($args, [$source, $target]), false);
 		if (!$ret['success']) {
 			$this->log('FAILED: ' . trim($ret['stderr']));
 			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
+		}
+		if ($where === 'live') {
+			$this->reapplyAcls($snap);
+			$this->log(sprintf('restored in place at %s in %.1fs', $this->visiblePath($target) ?: '/', microtime(true) - $t));
+
+			return $this->visiblePath($target) ?: '/';
 		}
 		// restore writes original owners; the directories we made are root's, hand them to the site admin
 		$this->chownToAdmin($this->restoreRoot(), $target);
 		$this->log(sprintf('restored to %s in %.1fs', $this->visiblePath($target), microtime(true) - $t));
 
 		return $this->visiblePath($target);
+	}
+
+	/**
+	 * Kopia restores owners and modes but not POSIX ACLs; Fortification depends on them, so put back
+	 * the ACL dump taken with that run. Its paths are absolute shadow paths, which is where the files live.
+	 */
+	private function reapplyAcls(array $snap): void
+	{
+		if (empty($snap['sources']['acl'])) {
+			$this->log('no ACL dump in this run; ACLs not re-applied');
+
+			return;
+		}
+		$staging = "{$this->stateDir}/restore";
+		if (!is_dir($staging)) {
+			mkdir($staging, 0700, true);
+		}
+		$file = "{$staging}/acl.txt";
+		@unlink($file);
+		$ret = $this->kopia(['restore', $snap['sources']['acl'], $file], false);
+		if (!$ret['success'] || !is_file($file)) {
+			$this->log('ACL dump restore FAILED: ' . trim($ret['stderr']));
+
+			return;
+		}
+		$ret = (new \Util_Process_Safe())->run('setfacl --restore=%s', $file);
+		@unlink($file);
+		// entries for files that no longer exist are reported, not fatal
+		$this->log($ret['success'] ? 'ACLs re-applied' : 'ACLs re-applied with warnings: ' . trim(substr((string)$ret['stderr'], 0, 500)));
 	}
 
 	/**

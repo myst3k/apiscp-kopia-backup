@@ -131,11 +131,34 @@
 						<div class="col-md-6">
 							<h6>Files</h6>
 							<div class="form-group">
-								<label for="restore_path">Path inside the site</label>
-								<input type="text" class="form-control" id="restore_path" name="restore_path" value="var/www" placeholder="empty = entire site"/>
-								<small class="form-text text-muted">Written to <code>~/restore/&lt;date&gt;/</code> in the site's home with original owners. Nothing live is touched; copy back what you need.</small>
+								<label for="restore_what">What</label>
+								@php $adminHome = 'home'; @endphp
+								<select class="form-control custom-select" id="restore_what" name="restore_what">
+									<option value="var/www">Web files (var/www)</option>
+									<option value="">Entire site</option>
+									<option value="home">Home directories (home)</option>
+									<option value="custom">A specific folder…</option>
+								</select>
 							</div>
-							<button type="submit" name="restore_files" value="1" class="btn btn-secondary" {{ $st['restoring'] ? 'disabled' : '' }}>Restore files</button>
+							<div class="form-group">
+								<label for="restore_custom_path">Specific folder</label>
+								<input type="text" class="form-control" id="restore_custom_path" name="restore_custom_path" placeholder="var/www/html/wp-content/uploads"/>
+								<small class="form-text text-muted">Only used with "A specific folder…". Paths are as the site sees them, without the leading slash.</small>
+							</div>
+							<div class="form-group">
+								<label for="restore_where">Where</label>
+								<select class="form-control custom-select" id="restore_where" name="restore_where">
+									<option value="copy">Safe copy into ~/restore/&lt;date&gt;/, same paths underneath</option>
+									<option value="live">Back in place, overwriting the live files</option>
+								</select>
+							</div>
+							<div class="form-group custom-control custom-checkbox">
+								<input type="checkbox" class="custom-control-input" id="restore_delete_extra" name="restore_delete_extra" value="1"/>
+								<label class="custom-control-label" for="restore_delete_extra">In place only: also remove files that are not in the snapshot</label>
+							</div>
+							<button type="submit" name="restore_files" value="1" class="btn btn-secondary warn"
+								data-prompt="Restore files from the selected snapshot? An in-place restore overwrites the live files at their original paths."
+								{{ $st['restoring'] ? 'disabled' : '' }}>Restore files</button>
 						</div>
 						<div class="col-md-6">
 							<h6>Database</h6>
