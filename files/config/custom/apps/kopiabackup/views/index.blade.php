@@ -60,7 +60,7 @@
 			       placeholder="{{ $s['secret_key'] ? 'stored, leave blank to keep' : '' }}"/>
 		</div>
 		<div class="col-12">
-			<small class="form-text text-muted mb-3">Save the bucket first, then create the key from the policy on the <a href="#tab-setup" data-toggle="tab">Bucket setup</a> tab.</small>
+			<small class="form-text text-muted mb-3">Save the bucket first, then create the key from the policy on the <a href="#tab-setup" onclick="document.querySelector('.nav-tabs a[href=\'#tab-setup\']').click();return false">Bucket setup</a> tab.</small>
 		</div>
 	</div>
 
