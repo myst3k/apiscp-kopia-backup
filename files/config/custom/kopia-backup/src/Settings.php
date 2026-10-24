@@ -44,6 +44,7 @@ class Settings
 		'/var/www/*/wp-content/upgrade',
 		'/var/www/*/wp-content/upgrade-temp-backup',
 		'/var/www/*/wp-content/debug.log',
+		'/var/www/*/wp-content/uploads/wp-statistics',
 		'/home/*/mysql_backups',
 		'/home/*/.cache',
 		'/home/*/.wp-cli/cache',
