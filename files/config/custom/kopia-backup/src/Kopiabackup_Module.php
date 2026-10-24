@@ -495,6 +495,18 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'error'     => $st['error'] ?? null,
 				'verified'  => $st['verify']['finished'] ?? null,
 				'verify_ok' => $st['verify']['ok'] ?? null,
+				'verify_detail' => $st['verify'] ? [
+					'integrity_ok' => $st['verify']['integrity']['ok'] ?? null,
+					'integrity'    => $st['verify']['integrity']['output'] ?? null,
+					'locks'        => isset($st['verify']['locks']) ? array_intersect_key($st['verify']['locks'], array_flip(['objects', 'sampled', 'locked', 'unlocked', 'wrong_mode', 'short', 'mode', 'earliest_retain_until'])) : null,
+				] : null,
+				'duration'  => isset($st['finished'], $st['started']) ? $st['finished'] - $st['started'] : null,
+				'snapshots' => $st['repo']['snapshots'] ?? null,
+				'oldest'    => $st['repo']['oldest'] ?? null,
+				'stored'    => $st['repo']['stored'] ?? null,
+				'runs'      => $st['counters']['runs'] ?? 0,
+				'failed_runs' => $st['counters']['failed'] ?? 0,
+				'first_run' => $st['counters']['first_run'] ?? null,
 			];
 		}
 

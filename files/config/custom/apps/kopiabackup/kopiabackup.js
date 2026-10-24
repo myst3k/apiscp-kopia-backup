@@ -49,8 +49,11 @@
 			if (st.verifying) {
 				result.append(' ').append(badge('info', 'verifying'));
 			}
-			row.find('.kb-dbs').text(st.finished ? st.databases : '');
-			row.find('.kb-size').text(st.size ? bytes(st.size) : '');
+			var snaps = row.find('.kb-snapshots').empty();
+			if (st.snapshots !== null && st.snapshots !== undefined) {
+				snaps.text(st.snapshots).append($('<small>').addClass('text-muted').text(' since ' + stamp(st.oldest)));
+			}
+			row.find('.kb-stored').text(st.stored ? bytes(st.stored) : '');
 			var verified = row.find('.kb-verified').empty();
 			if (st.verified) {
 				verified.text(stamp(st.verified) + ' ').append(badge(st.verify_ok ? 'success' : 'danger', st.verify_ok ? 'ok' : 'failed'));

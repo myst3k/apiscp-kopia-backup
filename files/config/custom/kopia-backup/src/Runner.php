@@ -65,6 +65,7 @@ class Runner
 			$this->dumpAcls();
 			$this->report['snapshots'] = $this->snapshot();
 			$this->kopia(['maintenance', 'run']);
+			$this->report['repo'] = $this->repoStats();
 			$this->report['ok'] = true;
 		} catch (\Throwable $e) {
 			$this->report['error'] = $e->getMessage();
@@ -72,6 +73,7 @@ class Runner
 		} finally {
 			$this->report['finished'] = time();
 			file_put_contents("{$this->stateDir}/last.json", json_encode($this->report, JSON_PRETTY_PRINT));
+			$this->bumpCounters($this->report['ok']);
 			@unlink("{$this->stateDir}/running.json");
 			flock($lock, LOCK_UN);
 			fclose($lock);
@@ -93,6 +95,45 @@ class Runner
 		$lines = preg_split('/\R/', trim($ret['stderr'] . "\n" . $ret['stdout']));
 
 		return ['ok' => $ret['success'], 'output' => implode("\n", array_slice(array_filter($lines), -15))];
+	}
+
+	/**
+	 * What Kopia holds for this site: retained snapshots of the files source and bytes stored in the bucket
+	 *
+	 * @return array{snapshots?: int, oldest?: ?int, stored?: int}
+	 */
+	private function repoStats(): array
+	{
+		$stats = [];
+		$ret = $this->kopia(['snapshot', 'list', '--all', '--json'], false);
+		if ($ret['success'] && is_array($list = json_decode($ret['stdout'], true))) {
+			$times = [];
+			foreach ($list as $snap) {
+				if (($snap['source']['path'] ?? '') === $this->shadowPath() && !empty($snap['startTime'])) {
+					$times[] = strtotime($snap['startTime']);
+				}
+			}
+			$times = array_filter($times);
+			$stats['snapshots'] = count($times);
+			$stats['oldest'] = $times ? min($times) : null;
+		}
+		$ret = $this->kopia(['blob', 'stats', '--raw'], false);
+		if ($ret['success'] && preg_match('/Total:\s*(\d+)/', $ret['stdout'], $m)) {
+			$stats['stored'] = (int)$m[1];
+		}
+
+		return $stats;
+	}
+
+	private function bumpCounters(bool $ok): void
+	{
+		$file = "{$this->stateDir}/counters.json";
+		$c = is_file($file) ? (array)json_decode((string)file_get_contents($file), true) : [];
+		$c += ['runs' => 0, 'ok' => 0, 'failed' => 0, 'consecutive_failures' => 0, 'first_run' => $this->report['started']];
+		$c['runs']++;
+		$c[$ok ? 'ok' : 'failed']++;
+		$c['consecutive_failures'] = $ok ? 0 : $c['consecutive_failures'] + 1;
+		file_put_contents($file, json_encode($c));
 	}
 
 	public static function saveVerify(string $site, array $report): void
@@ -117,6 +158,7 @@ class Runner
 			fclose($fh);
 		}
 		$current = is_file("{$dir}/running.json") ? (array)json_decode((string)file_get_contents("{$dir}/running.json"), true) : [];
+		$counters = is_file("{$dir}/counters.json") ? (array)json_decode((string)file_get_contents("{$dir}/counters.json"), true) : [];
 
 		return $last + [
 			'running'     => $running,
@@ -126,6 +168,7 @@ class Runner
 			'ok'          => null,
 			'finished'    => null,
 			'verify'      => $verify,
+			'counters'    => $counters,
 		];
 	}
 

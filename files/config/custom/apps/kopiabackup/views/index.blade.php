@@ -53,6 +53,41 @@
 						@if ($editStatus && $editStatus['ok'] === false && $editStatus['error'])
 							<div class="alert alert-danger">Last run failed: {{ $editStatus['error'] }}</div>
 						@endif
+						@if ($editStatus && $editStatus['finished'])
+							<table class="table table-sm w-auto">
+								<tbody>
+									<tr><th class="pr-4">Last run</th><td>{{ date('M j, Y H:i', $editStatus['finished']) }}, {{ \Formatter::time((int)$editStatus['duration']) }}</td></tr>
+									<tr><th class="pr-4">Files</th><td>{{ \Formatter::reduceBytes($editStatus['size']) }} across {{ $editStatus['databases'] }} database{{ $editStatus['databases'] === 1 ? '' : 's' }} and the site tree</td></tr>
+									<tr><th class="pr-4">Repository</th><td>{{ $editStatus['snapshots'] }} snapshots, {{ $editStatus['stored'] ? \Formatter::reduceBytes($editStatus['stored']) : '?' }} stored after dedup and compression</td></tr>
+									<tr><th class="pr-4">Runs</th><td>{{ $editStatus['runs'] }} since {{ $editStatus['first_run'] ? date('M j, Y', $editStatus['first_run']) : '?' }}, {{ $editStatus['failed_runs'] }} failed</td></tr>
+								</tbody>
+							</table>
+						@endif
+						@if ($editStatus && $editStatus['verify_detail'])
+							@php $vd = $editStatus['verify_detail']; @endphp
+							<h6>Last verification: {{ date('M j, Y H:i', $editStatus['verified']) }}</h6>
+							<div class="alert alert-{{ $vd['integrity_ok'] ? 'success' : 'danger' }}">
+								<b>Snapshot integrity:</b> {{ $vd['integrity_ok'] ? 'all referenced objects present, sampled contents match' : 'failed' }}
+								@if (!$vd['integrity_ok'] && $vd['integrity'])
+									<pre class="mb-0 mt-2">{{ $vd['integrity'] }}</pre>
+								@endif
+							</div>
+							@if ($vd['locks'])
+								@php $l = $vd['locks']; $lockOk = !$l['unlocked'] && !$l['wrong_mode'] && !$l['short']; @endphp
+								<div class="alert alert-{{ $lockOk ? 'success' : 'danger' }}">
+									<b>Object locks:</b> {{ $l['locked'] }} of {{ $l['sampled'] }} sampled objects locked ({{ $l['objects'] }} in repository), mode {{ $l['mode'] ?? '?' }}, earliest expiry {{ $l['earliest_retain_until'] ?? '?' }}
+									@if (!$lockOk)
+										<ul class="mb-0 mt-2">
+											@foreach (['unlocked' => 'No lock', 'wrong_mode' => 'Wrong mode', 'short' => 'Lock too short'] as $k => $label)
+												@foreach ($l[$k] as $item)<li>{{ $label }}: {{ $item }}</li>@endforeach
+											@endforeach
+										</ul>
+									@endif
+								</div>
+							@else
+								<div class="alert alert-danger"><b>Object locks:</b> could not be read</div>
+							@endif
+						@endif
 						<h6>Ignore rules</h6>
 						<p class="text-muted">Added to the global list on the Ignore rules section. Gitignore syntax, relative to the site root, e.g. <code>/var/www/example.com/wp-content/uploads/videos</code>.</p>
 						<input type="hidden" name="site_ignore_domain" value="{{ $editSite }}"/>
@@ -78,7 +113,7 @@
 			</div>
 			<table class="table">
 				<thead>
-					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Databases</th><th>Size</th><th>Verified</th><th></th></tr>
+					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Snapshots</th><th>Stored</th><th>Verified</th><th></th></tr>
 				</thead>
 				<tbody>
 					@foreach ($sites as $siteId => $st)
@@ -99,8 +134,12 @@
 									<span class="badge badge-info">verifying</span>
 								@endif
 							</td>
-							<td class="kb-dbs">{{ $st['finished'] ? $st['databases'] : '' }}</td>
-							<td class="kb-size">{{ $st['size'] ? \Formatter::reduceBytes($st["size"]) : '' }}</td>
+							<td class="kb-snapshots">
+								@if ($st['snapshots'] !== null)
+									{{ $st['snapshots'] }}<small class="text-muted"> since {{ date('M j', $st['oldest']) }}</small>
+								@endif
+							</td>
+							<td class="kb-stored">{{ $st['stored'] ? \Formatter::reduceBytes($st['stored']) : '' }}</td>
 							<td class="kb-verified">
 								@if ($st['verified'])
 									{{ date('M j', $st['verified']) }}
