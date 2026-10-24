@@ -3,6 +3,7 @@
 	$version = $Page->getKopiaVersion();
 	$results = $Page->getTestResults();
 	$badge = ['pass' => 'success', 'fail' => 'danger', 'skip' => 'secondary'];
+	$setupTab = isset($_GET['tab']) && $_GET['tab'] === 'setup';
 @endphp
 
 <div class="row mb-3">
@@ -18,6 +19,17 @@
 	</div>
 </div>
 
+<ul class="nav nav-tabs mb-3" role="tablist">
+	<li class="nav-item">
+		<a class="nav-link {{ $setupTab ? '' : 'active' }}" data-toggle="tab" href="#tab-settings" role="tab">Settings</a>
+	</li>
+	<li class="nav-item">
+		<a class="nav-link {{ $setupTab ? 'active' : '' }}" data-toggle="tab" href="#tab-setup" role="tab">Bucket setup</a>
+	</li>
+</ul>
+
+<div class="tab-content">
+<div class="tab-pane {{ $setupTab ? '' : 'active' }}" id="tab-settings" role="tabpanel">
 <form method="post">
 	<h4>Storage</h4>
 	<div class="row">
@@ -40,12 +52,15 @@
 		</div>
 		<div class="form-group col-md-3">
 			<label for="access_key">Access key</label>
-			<input type="text" class="form-control" id="access_key" name="access_key" value="{{ $s['access_key'] }}" autocomplete="off" required/>
+			<input type="text" class="form-control" id="access_key" name="access_key" value="{{ $s['access_key'] }}" autocomplete="off"/>
 		</div>
 		<div class="form-group col-md-3">
 			<label for="secret_key">Secret key</label>
 			<input type="password" class="form-control" id="secret_key" name="secret_key" value="" autocomplete="new-password"
-			       placeholder="{{ $s['secret_key'] ? 'stored, leave blank to keep' : '' }}" {{ $s['secret_key'] ? '' : 'required' }}/>
+			       placeholder="{{ $s['secret_key'] ? 'stored, leave blank to keep' : '' }}"/>
+		</div>
+		<div class="col-12">
+			<small class="form-text text-muted mb-3">Save the bucket first, then create the key from the policy on the <a href="#tab-setup" data-toggle="tab">Bucket setup</a> tab.</small>
 		</div>
 	</div>
 
@@ -75,7 +90,7 @@
 
 	<div class="btn-group mb-4">
 		<button type="submit" name="save" value="1" class="btn btn-primary">Save</button>
-		<button type="submit" name="test" value="1" class="btn btn-secondary">Save &amp; test bucket</button>
+		<button type="submit" name="test" value="1" class="btn btn-secondary" {{ $s['access_key'] && $s['secret_key'] ? '' : 'disabled' }}>Save &amp; test bucket</button>
 	</div>
 </form>
 
@@ -94,16 +109,34 @@
 		</tbody>
 	</table>
 @endif
+</div>
 
-<h4>Bucket setup</h4>
-<p class="mb-2">Create the bucket with object lock enabled and leave default retention off. Apply this lifecycle rule with an admin key:</p>
-<pre class="mb-2"><code>{{ json_encode(['Rules' => [[
-	'ID' => 'kopia-cleanup',
-	'Status' => 'Enabled',
-	'Filter' => ['Prefix' => (string)$s['prefix']],
-	'NoncurrentVersionExpiration' => ['NoncurrentDays' => (int)$s['lock_days'] + 1],
-	'Expiration' => ['ExpiredObjectDeleteMarker' => true],
-	'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 7],
-]]], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</code></pre>
-<p class="text-muted">The backup key needs Get/Put/List/DeleteObject, PutObjectRetention and GetObjectRetention, plus read access to the bucket's
-	versioning, object lock and lifecycle configuration. Deny DeleteObjectVersion and every Put on bucket configuration.</p>
+<div class="tab-pane {{ $setupTab ? 'active' : '' }}" id="tab-setup" role="tabpanel">
+@if (!$s['bucket'])
+	<p class="text-muted">Save a bucket name on the Settings tab first. The policy and lifecycle rule below are generated for it.</p>
+@else
+	<h4>1. Bucket</h4>
+	<p>Create <code>{{ $s['bucket'] }}</code> with object lock enabled. Leave default retention off; Kopia locks each object itself.</p>
+
+	<h4>2. Backup key policy</h4>
+	<p>Policies &rarr; Create Policy, paste this. Then create a user with programmatic access only, attach the policy, generate a key and enter it on the Settings tab.</p>
+	<div class="position-relative mb-4">
+		<button type="button" class="btn btn-sm btn-secondary position-absolute" style="top:.5rem;right:.5rem"
+		        onclick="navigator.clipboard.writeText(document.getElementById('key-policy').textContent).then(()=>{this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+		<pre class="p-3 border rounded bg-light"><code id="key-policy">{{ $Page->getKeyPolicy($s['bucket']) }}</code></pre>
+	</div>
+
+	<h4>3. Lifecycle rule</h4>
+	<p>Apply with an admin key, not the backup key. Noncurrent versions expire after lock + 1 days ({{ (int)$s['lock_days'] + 1 }}). Never add a rule that expires current versions.</p>
+	<div class="position-relative mb-4">
+		<button type="button" class="btn btn-sm btn-secondary position-absolute" style="top:.5rem;right:.5rem"
+		        onclick="navigator.clipboard.writeText(document.getElementById('lifecycle').textContent).then(()=>{this.textContent='Copied';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>
+		<pre class="p-3 border rounded bg-light"><code id="lifecycle">{{ $Page->getLifecycleRule((string)$s['prefix'], (int)$s['lock_days']) }}</code></pre>
+	</div>
+	<pre class="mb-4"><code>aws s3api put-bucket-lifecycle-configuration --endpoint-url {{ $s['endpoint'] }} --bucket {{ $s['bucket'] }} --lifecycle-configuration file://lifecycle.json</code></pre>
+
+	<h4>4. Verify</h4>
+	<p>Back on Settings, <b>Save &amp; test bucket</b> checks all of the above with the stored key.</p>
+@endif
+</div>
+</div>

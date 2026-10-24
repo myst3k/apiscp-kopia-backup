@@ -21,14 +21,13 @@ The menu is cached per session, so log out and back in to see the link. The add-
 
 - Create it with object lock enabled. Leave default retention off.
 - Add the lifecycle rule shown on the admin page, using an admin key.
-- In Wasabi, create a policy from the JSON below (replace `BUCKET`), create a user with programmatic access only, attach the policy, and generate an access key for it. `ListBucketVersions` and `GetObjectVersion` are read-only and are what `kopia --point-in-time` recovery needs.
+- The admin page's **Bucket setup** tab generates this policy for the saved bucket. In Wasabi, create a policy from it, create a user with programmatic access only, attach the policy, and generate an access key for it. `ListBucketVersions` and `GetObjectVersion` are read-only and are what `kopia --point-in-time` recovery needs.
 
 ```json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "BucketRead",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
@@ -42,7 +41,6 @@ The menu is cached per session, so log out and back in to see the link. The add-
       "Resource": "arn:aws:s3:::BUCKET"
     },
     {
-      "Sid": "ObjectReadWrite",
       "Effect": "Allow",
       "Action": [
         "s3:GetObject",
@@ -55,27 +53,12 @@ The menu is cached per session, so log out and back in to see the link. The add-
         "s3:PutObjectRetention"
       ],
       "Resource": "arn:aws:s3:::BUCKET/*"
-    },
-    {
-      "Sid": "NeverDestroy",
-      "Effect": "Deny",
-      "Action": [
-        "s3:DeleteObjectVersion",
-        "s3:BypassGovernanceRetention",
-        "s3:PutLifecycleConfiguration",
-        "s3:PutBucketObjectLockConfiguration",
-        "s3:PutBucketVersioning",
-        "s3:PutBucketPolicy",
-        "s3:DeleteBucketPolicy",
-        "s3:DeleteBucket"
-      ],
-      "Resource": ["arn:aws:s3:::BUCKET", "arn:aws:s3:::BUCKET/*"]
     }
   ]
 }
 ```
 
-Enter the settings on the admin page, then **Test bucket**. CLI equivalent: `cpcmd kopiabackup:test-bucket`.
+Enter the settings on the admin page, then **Save & test bucket**. CLI equivalent: `cpcmd kopiabackup:test-bucket`.
 
 ## How sites are backed up
 

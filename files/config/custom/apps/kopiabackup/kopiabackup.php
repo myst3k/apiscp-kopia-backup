@@ -75,4 +75,54 @@ class Page extends Page_Container
 	{
 		return $this->testResults;
 	}
+
+	/**
+	 * IAM policy for the backup key, scoped to the saved bucket
+	 */
+	public function getKeyPolicy(string $bucket): string
+	{
+		$arn = "arn:aws:s3:::{$bucket}";
+
+		return $this->json([
+			'Version'   => '2012-10-17',
+			'Statement' => [
+				[
+					'Sid'      => 'BucketRead',
+					'Effect'   => 'Allow',
+					'Action'   => [
+						's3:ListBucket', 's3:ListBucketVersions', 's3:ListBucketMultipartUploads', 's3:GetBucketLocation',
+						's3:GetBucketVersioning', 's3:GetBucketObjectLockConfiguration', 's3:GetLifecycleConfiguration',
+					],
+					'Resource' => $arn,
+				],
+				[
+					'Sid'      => 'ObjectReadWrite',
+					'Effect'   => 'Allow',
+					'Action'   => [
+						's3:GetObject', 's3:GetObjectVersion', 's3:PutObject', 's3:DeleteObject',
+						's3:AbortMultipartUpload', 's3:ListMultipartUploadParts',
+						's3:GetObjectRetention', 's3:PutObjectRetention',
+					],
+					'Resource' => "{$arn}/*",
+				],
+			],
+		]);
+	}
+
+	public function getLifecycleRule(string $prefix, int $lockDays): string
+	{
+		return $this->json(['Rules' => [[
+			'ID'                             => 'kopia-cleanup',
+			'Status'                         => 'Enabled',
+			'Filter'                         => ['Prefix' => $prefix],
+			'NoncurrentVersionExpiration'    => ['NoncurrentDays' => $lockDays + 1],
+			'Expiration'                     => ['ExpiredObjectDeleteMarker' => true],
+			'AbortIncompleteMultipartUpload' => ['DaysAfterInitiation' => 7],
+		]]]);
+	}
+
+	private function json(array $data): string
+	{
+		return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+	}
 }
