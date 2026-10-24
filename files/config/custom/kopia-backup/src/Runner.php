@@ -431,7 +431,7 @@ class Runner
 	 *
 	 * @return array<int, array{run: string, time: int, size: int, files: int, sources: array<string, string>, databases: string[]}>
 	 */
-	public function listSnapshots(int $limit = 30): array
+	public function listSnapshots(int $limit = 30, bool $withDatabases = true): array
 	{
 		$this->ensureRepo(false);
 		$ret = $this->kopia(['snapshot', 'list', '--all', '--json']);
@@ -462,12 +462,10 @@ class Runner
 		}
 		usort($runs, static fn($a, $b) => $b['time'] <=> $a['time']);
 		$runs = array_slice($runs, 0, $limit);
-		foreach ($runs as &$r) {
-			if (isset($r['sources']['db'])) {
-				$r['databases'] = $this->databasesIn($r['sources']['db']);
-			}
+		// each lookup is a separate kopia invocation; only the newest run needs its database names for the UI
+		if ($withDatabases && $runs && isset($runs[0]['sources']['db'])) {
+			$runs[0]['databases'] = $this->databasesIn($runs[0]['sources']['db']);
 		}
-		unset($r);
 
 		return $runs;
 	}
@@ -514,7 +512,7 @@ class Runner
 		}
 		$t = microtime(true);
 		$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
-		$ret = $this->kopia(['restore', '--parallel', '4', $source, $target], false, true);
+		$ret = $this->kopia(['restore', '--parallel', '4', $source, $target], false);
 		if (!$ret['success']) {
 			$this->log('FAILED: ' . trim($ret['stderr']));
 			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
@@ -594,7 +592,7 @@ class Runner
 
 	private function findRun(string $run): array
 	{
-		foreach ($this->listSnapshots(1000) as $r) {
+		foreach ($this->listSnapshots(1000, false) as $r) {
 			if ($r['run'] === $run) {
 				return $r;
 			}

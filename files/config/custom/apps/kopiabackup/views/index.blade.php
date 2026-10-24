@@ -123,7 +123,7 @@
 						<label for="restore_run">Snapshot</label>
 						<select class="form-control custom-select" id="restore_run" name="restore_run">
 							@foreach ($snapshots as $snap)
-								<option value="{{ $snap['run'] }}">{{ date('M j, Y H:i', $snap['time']) }} &mdash; {{ \Formatter::reduceBytes($snap['size']) }}, {{ number_format($snap['files']) }} files, {{ count($snap['databases']) }} database{{ count($snap['databases']) === 1 ? '' : 's' }}</option>
+								<option value="{{ $snap['run'] }}">{{ date('M j, Y H:i', $snap['time']) }} &mdash; {{ \Formatter::reduceBytes($snap['size']) }}, {{ number_format($snap['files']) }} files{{ isset($snap['sources']['db']) ? '' : ', no database dump' }}</option>
 							@endforeach
 						</select>
 					</div>
