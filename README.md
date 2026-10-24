@@ -2,7 +2,7 @@
 
 ApisCP add-in: per-site Kopia backups to an object-locked S3 bucket. Installs Kopia from the official RPM repo, registers the `kopiabackup` module, and adds **System → Kopia Backup** to the admin panel.
 
-Status: early, not yet tested on a live server. The settings page and bucket check are written; scheduled backups and restores are not.
+Status: early. Settings, bucket verification, per-site backups and the nightly timer are written; restores are not yet. Not yet proven on a live server beyond the bucket check.
 
 ## Install
 
@@ -60,8 +60,18 @@ The menu is cached per session, so log out and back in to see the link. The add-
 
 Enter the settings on the admin page, then **Save & test bucket**. CLI equivalent: `cpcmd kopiabackup:test-bucket`.
 
-## How sites will be backed up (planned, not yet implemented)
+## How sites are backed up
 
 - One Kopia repo per site at `<prefix><site>/`, created with splitter `DYNAMIC-1M-BUZHASH` so small scattered row changes re-upload less.
 - Databases: each of the site's MySQL databases is dumped nightly as uncompressed SQL with `mysqldump --single-transaction --quick --routines --triggers --events --skip-dump-date` into `/var/lib/kopia-backup/<site>/`. Kopia stores only changed chunks, so each night uploads the difference and every snapshot restores as a complete dump.
 - Files: the site's `shadow` and `info`. ApisCP's own compressed exports under `mysql_backups/` are excluded.
+
+## Running backups
+
+- **Sites** section of the admin page: last run per site and a **Back up now** button that queues a panel job.
+- **Kopia** section: the nightly timer toggle (02:30, every active site, one at a time under `nice`/`ionice`).
+- CLI: `cpcmd kopiabackup:run smokinbearcigars.com`, `cpcmd kopiabackup:run-all`, `cpcmd kopiabackup:status`.
+
+Every repository password derives from one master secret created on first run and kept in the ApisCP keyring. Store it in a password manager: `cpcmd keyring:get kopiabackup.master`. Without it nothing in the bucket can be read.
+
+Per-site state lives in `/var/lib/kopia-backup/<siteN>/` (Kopia config, SQL dumps, ACL dump, `last.json`, logs); cache in `/var/cache/kopia-backup/<siteN>/`. Both are root-only.

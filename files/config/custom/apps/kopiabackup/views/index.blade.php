@@ -10,7 +10,10 @@
 	<ul class="col-12 col-sm-4 col-lg-3 col-xl-2 mb-3 list-group float-left nav nav-pills" id="menu" role="tablist"
 	    aria-multiselectable="true">
 		<li class="nav-item block">
-			<a href="#storage" data-toggle="pill" class="nav-link active" data-parent="#menu" role="tab">Storage</a>
+			<a href="#sites" data-toggle="pill" class="nav-link active" data-parent="#menu" role="tab">Sites</a>
+		</li>
+		<li class="nav-item block">
+			<a href="#storage" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Storage</a>
 		</li>
 		<li class="nav-item block">
 			<a href="#retention" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Retention</a>
@@ -31,7 +34,43 @@
 	</ul>
 
 	<div class="col-12 col-sm-8 col-lg-9 col-xl-10 float-left tab-content">
-		<div class="tab-pane active" id="storage" role="tabpanel">
+		<div class="tab-pane active" id="sites" role="tabpanel">
+			@php $sites = $Page->getSites(); @endphp
+			@if (!$s['bucket'] || !$s['access_key'])
+				<div class="alert alert-info">Configure Storage and pass the bucket test before running backups.</div>
+			@endif
+			<table class="table">
+				<thead>
+					<tr><th>Site</th><th>Last backup</th><th>Result</th><th>Databases</th><th>Size</th><th></th></tr>
+				</thead>
+				<tbody>
+					@foreach ($sites as $siteId => $st)
+						<tr>
+							<td>{{ $st['domain'] }}</td>
+							<td>{{ $st['finished'] ? date('M j, Y H:i', $st['finished']) : 'never' }}</td>
+							<td>
+								@if ($st['running'])
+									<span class="badge badge-info">running</span>
+								@elseif ($st['ok'] === true)
+									<span class="badge badge-success">ok</span>
+								@elseif ($st['ok'] === false)
+									<span class="badge badge-danger" title="{{ $st['error'] }}">failed</span>
+								@endif
+							</td>
+							<td>{{ $st['finished'] ? $st['databases'] : '' }}</td>
+							<td>{{ $st['size'] ? \Formatter::reduceBytes($st["size"]) : '' }}</td>
+							<td class="text-right">
+								<button type="submit" name="backup" value="{{ $st['domain'] }}" class="btn btn-secondary btn-sm"
+									{{ $st['running'] || !$s['bucket'] ? 'disabled' : '' }}>Back up now</button>
+							</td>
+						</tr>
+					@endforeach
+				</tbody>
+			</table>
+			<p class="text-muted">Back up now queues a job; watch it in the job indicator at the top of the panel.</p>
+		</div>
+
+		<div class="tab-pane" id="storage" role="tabpanel">
 			<div class="row">
 				<div class="form-group col-md-6">
 					<label for="endpoint">Endpoint</label>
@@ -145,6 +184,13 @@
 				</select>
 				<small class="form-text text-muted">Applied on the next <code>upcp -b</code> or add-in run.</small>
 			</div>
+			<input type="hidden" name="timer_form" value="1"/>
+			<div class="form-group custom-control custom-checkbox">
+				<input type="checkbox" class="custom-control-input" id="timer_enabled" name="timer_enabled" value="1" {{ $Page->isTimerEnabled() ? 'checked' : '' }}/>
+				<label class="custom-control-label" for="timer_enabled">Nightly backup of every site at 02:30</label>
+			</div>
+			<p class="text-muted">Every repository password derives from one master secret in the keyring. Save it in a password manager:
+				<code>cpcmd keyring:get kopiabackup.master</code></p>
 		</div>
 
 		<div class="tab-pane" id="setup" role="tabpanel">

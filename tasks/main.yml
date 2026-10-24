@@ -77,6 +77,24 @@
     - apps/kopiabackup
   notify: Restart apnscp (kopia-backup)
 
+# installed but not enabled; the admin page turns the timer on
+- name: Install systemd units
+  copy:
+    src: "systemd/{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - kopia-backup.service
+    - kopia-backup.timer
+  register: _kb_units
+
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+  when: _kb_units.changed
+
 # boot.php and admin.php may already hold other customizations, so append a managed block
 - name: Seed PHP hook files
   copy:
@@ -98,6 +116,7 @@
       \a23r::register([
       	'KopiaBackup\\BucketCheck' => '@custom/kopia-backup/src/BucketCheck.php',
       	'KopiaBackup\\Settings'    => '@custom/kopia-backup/src/Settings.php',
+      	'KopiaBackup\\Runner'      => '@custom/kopia-backup/src/Runner.php',
       	'Kopiabackup_Module'       => '@custom/kopia-backup/src/Kopiabackup_Module.php',
       ]);
       \a23r::registerModule('kopiabackup', 'Kopiabackup_Module');

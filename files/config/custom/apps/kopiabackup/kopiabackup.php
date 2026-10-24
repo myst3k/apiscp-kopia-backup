@@ -80,8 +80,29 @@ class Page extends Page_Container
 		if (!$this->kopiabackup_set_settings($values)) {
 			return false;
 		}
+		if (array_key_exists('timer_form', $params) && !$this->kopiabackup_timer_set(!empty($params['timer_enabled']))) {
+			return false;
+		}
 
 		return success('Settings saved');
+	}
+
+	/**
+	 * Queue a backup of one site as a panel job
+	 */
+	public function handleBackup(array $params): bool
+	{
+		return $this->kopiabackup_schedule((string)$params['backup']);
+	}
+
+	public function getSites(): array
+	{
+		return (array)$this->kopiabackup_status();
+	}
+
+	public function isTimerEnabled(): bool
+	{
+		return (bool)$this->kopiabackup_timer_enabled();
 	}
 
 	/**

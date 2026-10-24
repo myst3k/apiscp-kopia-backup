@@ -1,0 +1,10 @@
+[Unit]
+Description=Kopia backup of all ApisCP sites
+After=network-online.target mariadb.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/apnscp/bin/cmd kopiabackup:run-all
+Nice=19
+IOSchedulingClass=idle

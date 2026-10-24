@@ -1,10 +1,16 @@
 <?php declare(strict_types=1);
 
 use KopiaBackup\BucketCheck;
+use KopiaBackup\Runner;
 use KopiaBackup\Settings;
+use Opcenter\Account\Enumerate;
+use Opcenter\Crypto\Keyring;
 
 class Kopiabackup_Module extends \Module_Skeleton
 {
+	private const MASTER_KEY = 'kopiabackup.master';
+	private const TIMER = 'kopia-backup.timer';
+
 	protected $exportedFunctions = [
 		'*' => PRIVILEGE_ADMIN,
 	];
@@ -126,5 +132,151 @@ class Kopiabackup_Module extends \Module_Skeleton
 		}
 
 		return $results;
+	}
+
+	/**
+	 * Back up one site now, in the foreground
+	 *
+	 * @param string $site domain or siteN
+	 * @return array|bool run report
+	 */
+	public function run(string $site)
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_run', $site);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		if ($missing = Settings::missing($s)) {
+			return error('missing settings: %s', implode(', ', $missing));
+		}
+
+		try {
+			$report = (new Runner($s, "site{$id}", $this->master()))->run();
+		} catch (\Throwable $e) {
+			return error('%s: %s', $site, $e->getMessage());
+		}
+		info('%s: backup complete, %d database(s), %d snapshot(s)', $report['domain'], count($report['databases'] ?? []), count($report['snapshots'] ?? []));
+
+		return $report;
+	}
+
+	/**
+	 * Back up every active site, one after another. Errors are collected so one site cannot stop the rest.
+	 *
+	 * @return array site => ok|failed
+	 */
+	public function run_all(): array
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_run_all');
+		}
+		$out = [];
+		foreach (Enumerate::active() as $site) {
+			$report = $this->run($site);
+			$out[$site] = is_array($report) && !empty($report['ok']) ? 'ok' : 'failed';
+		}
+		if ($failed = array_keys($out, 'failed', true)) {
+			error('backup failed for: %s', implode(', ', $failed));
+		}
+
+		return $out;
+	}
+
+	/**
+	 * Queue a site backup as a panel job so the UI returns at once
+	 */
+	public function schedule(string $site): bool
+	{
+		if (null === \Auth::get_site_id_from_anything($site)) {
+			return error("unknown site `%s'", $site);
+		}
+		$job = \Lararia\Jobs\Job::create(\Lararia\Jobs\SimpleCommandJob::class, $this->getAuthContext(), 'kopiabackup_run', $site);
+		$job->timeout = 6 * 3600;
+		$job->setTags(['kopia-backup', $site]);
+		$job->dispatch();
+
+		return info('backup queued for %s', $site);
+	}
+
+	/**
+	 * Per-site last run summary
+	 *
+	 * @return array siteN => {domain, running, ok, finished, started, size, databases, error}
+	 */
+	public function status(): array
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_status');
+		}
+		$out = [];
+		foreach (Enumerate::active() as $site) {
+			$st = Runner::status($site);
+			$size = 0;
+			foreach ((array)($st['snapshots'] ?? []) as $snap) {
+				$size += (int)($snap['size'] ?? 0);
+			}
+			$out[$site] = [
+				'domain'    => (string)(new \Opcenter\SiteConfiguration($site))->getServiceValue('siteinfo', 'domain'),
+				'running'   => $st['running'],
+				'ok'        => $st['ok'],
+				'started'   => $st['started'] ?? null,
+				'finished'  => $st['finished'],
+				'size'      => $size,
+				'databases' => count((array)($st['databases'] ?? [])),
+				'error'     => $st['error'] ?? null,
+			];
+		}
+
+		return $out;
+	}
+
+	public function timer_enabled(): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_timer_enabled');
+		}
+
+		return \Util_Process_Safe::exec(['systemctl', 'is-enabled', '--quiet', self::TIMER])['success'];
+	}
+
+	/**
+	 * Enable or disable the nightly timer
+	 */
+	public function timer_set(bool $enabled): bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_timer_set', $enabled);
+		}
+		if ($enabled === $this->timer_enabled()) {
+			return true;
+		}
+		$ret = \Util_Process_Safe::exec(['systemctl', $enabled ? 'enable' : 'disable', '--now', self::TIMER]);
+		if (!$ret['success']) {
+			return error('systemctl failed: %s', trim($ret['stderr']));
+		}
+
+		return info('nightly backup timer %s', $enabled ? 'enabled' : 'disabled');
+	}
+
+	/**
+	 * Master secret every repository password derives from. Created on first use.
+	 * Reveal with `cpcmd keyring:get kopiabackup.master` and store it in a password manager: without it
+	 * nothing in the bucket can be read.
+	 */
+	private function master(): string
+	{
+		if ($ref = $this->keyring_get(self::MASTER_KEY)) {
+			return (string)Keyring::decode($ref);
+		}
+		$new = bin2hex(random_bytes(32));
+		if (!$this->keyring_set(self::MASTER_KEY, $new)) {
+			throw new \RuntimeException('failed to store master secret in keyring');
+		}
+		warn('created master backup secret; save it now: cpcmd keyring:get %s', self::MASTER_KEY);
+
+		return $new;
 	}
 }
