@@ -512,7 +512,7 @@ class Runner
 		}
 		$t = microtime(true);
 		$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
-		$ret = $this->kopia(['restore', '--parallel', '4', $source, $target], false);
+		$ret = $this->kopia(['restore', '--parallel', '16', $source, $target], false);
 		if (!$ret['success']) {
 			$this->log('FAILED: ' . trim($ret['stderr']));
 			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
