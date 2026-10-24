@@ -38,6 +38,9 @@ class Page extends Page_Container
 		'retention_locked'      => ['deny', 'Shorten or bypass a lock', 'Extending a lock must work (Kopia renews locks nightly). Shortening it or deleting the locked version with the bypass flag must be refused.'],
 	];
 
+	// one-request handoff from the POST to the GET it redirects to
+	private const FLASH = 'kopiabackup.flash';
+
 	protected ?array $testResults = null;
 
 	public function __construct()
@@ -46,6 +49,14 @@ class Page extends Page_Container
 		// the menu only lists this app for admins, but the URL resolves for any login
 		if (!($this->getAuthContext()->level & PRIVILEGE_ADMIN)) {
 			fatal('Kopia Backup is restricted to the server administrator');
+		}
+		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' && \Session::exists(self::FLASH)) {
+			$flash = (array)\Session::get(self::FLASH);
+			\Session::forget(self::FLASH);
+			\Error_Reporter::merge_buffer((array)($flash['messages'] ?? []));
+			$this->testResults = $flash['testResults'] ?? null;
+			$this->kit = $flash['kit'] ?? null;
+			$this->editSite = $flash['editSite'] ?? null;
 		}
 	}
 
@@ -67,7 +78,19 @@ class Page extends Page_Container
 			return error('CSRF token mismatch; reload the page and try again');
 		}
 
-		return $this->dispatchPostback($_POST);
+		$this->dispatchPostback($_POST);
+
+		// Post/Redirect/Get, as core apps do: a browser refresh must not queue the job again.
+		// Messages and the page state the handlers produced ride along in the session for one request.
+		\Session::set(self::FLASH, [
+			'messages'    => \Error_Reporter::flush_buffer(),
+			'testResults' => $this->testResults,
+			'kit'         => $this->kit,
+			'editSite'    => $this->editSite,
+		]);
+		session_write_close();
+		header('Location: ' . \HTML_Kit::page_url_params(), true, 302);
+		exit();
 	}
 
 	public function handleSave(array $params): bool
