@@ -56,7 +56,8 @@ class Runner
 		}
 
 		$this->report = ['site' => $this->site, 'domain' => $this->domain, 'started' => time(), 'ok' => false];
-		file_put_contents("{$this->stateDir}/last.json", json_encode($this->report, JSON_PRETTY_PRINT));
+		// running.json marks a run in progress; last.json keeps the previous result until this one finishes
+		file_put_contents("{$this->stateDir}/running.json", json_encode($this->report));
 		try {
 			$this->ensureRepo();
 			$this->applyIgnores();
@@ -71,6 +72,7 @@ class Runner
 		} finally {
 			$this->report['finished'] = time();
 			file_put_contents("{$this->stateDir}/last.json", json_encode($this->report, JSON_PRETTY_PRINT));
+			@unlink("{$this->stateDir}/running.json");
 			flock($lock, LOCK_UN);
 			fclose($lock);
 		}
@@ -114,8 +116,17 @@ class Runner
 			$running = !flock($fh, LOCK_EX | LOCK_NB);
 			fclose($fh);
 		}
+		$current = is_file("{$dir}/running.json") ? (array)json_decode((string)file_get_contents("{$dir}/running.json"), true) : [];
 
-		return $last + ['running' => $running, 'ok' => null, 'finished' => null, 'verify' => $verify];
+		return $last + [
+			'running'     => $running,
+			'run_started' => $current['started'] ?? null,
+			// a running.json nobody holds the lock for means the process died mid-run
+			'interrupted' => !$running && $current !== [],
+			'ok'          => null,
+			'finished'    => null,
+			'verify'      => $verify,
+		];
 	}
 
 	private function ensureRepo(bool $create = true): void

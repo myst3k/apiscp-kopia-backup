@@ -487,9 +487,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'domain'    => (string)(new \Opcenter\SiteConfiguration($site))->getServiceValue('siteinfo', 'domain'),
 				'running'   => $st['running'] || in_array("run-{$site}", $units, true),
 				'verifying' => in_array("verify-{$site}", $units, true),
-				// a report with a start but no finish and no lock holder means the process died
-				'ok'        => $st['ok'] === false && !$st['finished'] && !$st['running'] ? 'interrupted' : $st['ok'],
-				'started'   => $st['started'] ?? null,
+				'ok'        => $st['interrupted'] ? 'interrupted' : $st['ok'],
+				'started'   => $st['run_started'] ?? $st['started'] ?? null,
 				'finished'  => $st['finished'],
 				'size'      => $size,
 				'databases' => count((array)($st['databases'] ?? [])),
