@@ -51,3 +51,9 @@ The menu is cached per session, so log out and back in to see the link. The add-
 ```
 
 Enter the settings on the admin page, then **Test bucket**. CLI equivalent: `cpcmd kopiabackup:test-bucket`.
+
+## How sites are backed up
+
+- One Kopia repo per site at `<prefix><site>/`, created with splitter `DYNAMIC-1M-BUZHASH` so small scattered row changes re-upload less.
+- Databases: each of the site's MySQL databases is dumped nightly as uncompressed SQL with `mysqldump --single-transaction --quick --routines --triggers --events --skip-dump-date` into `/var/lib/kopia-backup/<site>/`. Kopia stores only changed chunks, so each night uploads the difference and every snapshot restores as a complete dump.
+- Files: the site's `shadow` and `info`. ApisCP's own compressed exports under `mysql_backups/` are excluded.
