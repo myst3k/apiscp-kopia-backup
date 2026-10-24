@@ -49,6 +49,71 @@ class BucketCheck
 	}
 
 	/**
+	 * Retention on a sample of objects under a repo prefix: every object Kopia wrote must carry a lock
+	 * in the configured mode that reaches at least lock_days from when it was written.
+	 *
+	 * @return array{prefix: string, objects: int, sampled: int, locked: int, unlocked: string[], wrong_mode: string[], short: string[], earliest_retain_until: ?string, mode: ?string}
+	 */
+	public function verifyLocks(string $repoPrefix, string $expectMode, int $sample = 25): array
+	{
+		$out = ['prefix' => $repoPrefix, 'objects' => 0, 'sampled' => 0, 'locked' => 0, 'unlocked' => [], 'wrong_mode' => [], 'short' => [], 'earliest_retain_until' => null, 'mode' => null];
+		$objects = [];
+		$token = null;
+		do {
+			$page = $this->s3->listObjectsV2(array_filter(['Bucket' => $this->bucket, 'Prefix' => $repoPrefix, 'ContinuationToken' => $token]));
+			foreach ((array)($page['Contents'] ?? []) as $o) {
+				$objects[] = $o;
+			}
+			$token = $page['NextContinuationToken'] ?? null;
+		} while ($token);
+		$out['objects'] = count($objects);
+		if (!$objects) {
+			return $out;
+		}
+		// newest objects first so a recent run is what gets checked, plus the format blob which is the oldest
+		usort($objects, static fn($a, $b) => $b['LastModified'] <=> $a['LastModified']);
+		$pick = array_slice($objects, 0, $sample);
+		foreach ($objects as $o) {
+			if (str_ends_with($o['Key'], 'kopia.repository')) {
+				$pick[] = $o;
+				break;
+			}
+		}
+
+		$earliest = null;
+		foreach ($pick as $o) {
+			$out['sampled']++;
+			try {
+				$r = $this->s3->getObjectRetention(['Bucket' => $this->bucket, 'Key' => $o['Key']])['Retention'] ?? null;
+			} catch (S3Exception $e) {
+				$out['unlocked'][] = $o['Key'] . ' (' . ($e->getAwsErrorCode() ?? 'error') . ')';
+				continue;
+			}
+			if (!$r || empty($r['RetainUntilDate'])) {
+				$out['unlocked'][] = $o['Key'];
+				continue;
+			}
+			$out['locked']++;
+			$out['mode'] ??= $r['Mode'] ?? null;
+			if (($r['Mode'] ?? '') !== $expectMode) {
+				$out['wrong_mode'][] = $o['Key'] . ' (' . ($r['Mode'] ?? '?') . ')';
+			}
+			$until = $r['RetainUntilDate'] instanceof \DateTimeInterface ? $r['RetainUntilDate'] : new \DateTimeImmutable((string)$r['RetainUntilDate']);
+			$written = $o['LastModified'] instanceof \DateTimeInterface ? $o['LastModified'] : new \DateTimeImmutable((string)$o['LastModified']);
+			// a day of slack: Kopia stamps the lock from its own clock, listing gives the server's
+			if ($until->getTimestamp() < $written->getTimestamp() + ($this->lockDays - 1) * 86400) {
+				$out['short'][] = $o['Key'] . ' until ' . $until->format('Y-m-d');
+			}
+			if ($earliest === null || $until < $earliest) {
+				$earliest = $until;
+			}
+		}
+		$out['earliest_retain_until'] = $earliest?->format('Y-m-d H:i');
+
+		return $out;
+	}
+
+	/**
 	 * @return array<string, array{status: string, detail: string}>
 	 */
 	public function run(): array

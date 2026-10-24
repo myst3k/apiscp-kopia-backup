@@ -135,6 +135,45 @@ class Kopiabackup_Module extends \Module_Skeleton
 	}
 
 	/**
+	 * Read the object-lock retention Wasabi reports on a sample of a site's repository objects
+	 *
+	 * @param string $site   domain or siteN
+	 * @param int    $sample objects to inspect (newest first)
+	 */
+	public function verify_locks(string $site, int $sample = 25): array|bool
+	{
+		if (!IS_CLI) {
+			return $this->query('kopiabackup_verify_locks', $site, $sample);
+		}
+		if (null === ($id = \Auth::get_site_id_from_anything($site))) {
+			return error("unknown site `%s'", $site);
+		}
+		$s = Settings::load();
+		if ($missing = Settings::missing($s)) {
+			return error('missing settings: %s', implode(', ', $missing));
+		}
+		$domain = (string)(new \Opcenter\SiteConfiguration("site{$id}"))->getServiceValue('siteinfo', 'domain');
+		try {
+			$r = (new BucketCheck(
+				$s['endpoint'], $s['region'], $s['bucket'], $s['prefix'],
+				$s['access_key'], $s['secret_key'], (int)$s['lock_days']
+			))->verifyLocks($s['prefix'] . $domain . '/', (string)$s['lock_mode'], max(1, $sample));
+		} catch (\Throwable $e) {
+			return error('%s: %s', $domain, $e->getMessage());
+		}
+		if (!$r['objects']) {
+			return error('%s: no objects under %s', $domain, $r['prefix']);
+		}
+		if ($r['unlocked'] || $r['wrong_mode'] || $r['short']) {
+			error('%s: %d unlocked, %d wrong mode, %d shorter than %d days', $domain, count($r['unlocked']), count($r['wrong_mode']), count($r['short']), (int)$s['lock_days']);
+		} else {
+			info('%s: %d of %d objects sampled, all %s-locked through at least %s', $domain, $r['sampled'], $r['objects'], $r['mode'], $r['earliest_retain_until']);
+		}
+
+		return $r;
+	}
+
+	/**
 	 * Back up one site now, in the foreground
 	 *
 	 * @param string $site domain or siteN
