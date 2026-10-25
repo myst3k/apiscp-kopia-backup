@@ -19,6 +19,9 @@
 			<a href="#retention" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Retention</a>
 		</li>
 		<li class="nav-item block">
+			<a href="#schedule" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Schedule</a>
+		</li>
+		<li class="nav-item block">
 			<a href="#ignore" data-toggle="pill" class="nav-link" data-parent="#menu" role="tab">Ignore rules</a>
 		</li>
 		<li class="nav-item block">
@@ -151,9 +154,13 @@
 									<option value="live">Back in place, overwriting the live files</option>
 								</select>
 							</div>
-							<div class="form-group custom-control custom-checkbox">
-								<input type="checkbox" class="custom-control-input" id="restore_delete_extra" name="restore_delete_extra" value="1"/>
-								<label class="custom-control-label" for="restore_delete_extra">In place only: also remove files that are not in the snapshot</label>
+							<div class="form-group form-check">
+								<label class="custom-control custom-checkbox mb-0 align-items-center">
+									<input type="hidden" value="0" name="restore_delete_extra"/>
+									<input class="form-check-input custom-control-input" type="checkbox" value="1" name="restore_delete_extra"/>
+									<span class="custom-control-indicator"></span>
+									In place only: also remove files that are not in the snapshot
+								</label>
 							</div>
 							<button type="submit" name="restore_files" value="1" class="btn btn-secondary warn"
 								data-prompt="Restore files from the selected snapshot? An in-place restore overwrites the live files at their original paths."
@@ -284,7 +291,7 @@
 							<li>Re-downloads {{ (int)$s['verify_percent'] }}% of file contents and checks the hashes</li>
 							<li>Confirms lock extension is on and maintenance ran in the last two days</li>
 							<li>Reads retention back from the bucket on a sample of objects</li>
-							<li>Also runs weekly, on the day set under Kopia</li>
+							<li>Also runs weekly, on the day set under Schedule</li>
 						</ul>
 					</dd>
 					<dt class="col-sm-2">Manage</dt>
@@ -402,6 +409,45 @@
 			<p class="text-muted">Lock mode and days are fixed when a repository is created. Keep settings are re-applied to every repository on each run.</p>
 		</div>
 
+		<div class="tab-pane" id="schedule" role="tabpanel">
+			<input type="hidden" name="timer_form" value="1"/>
+			<div class="form-group form-check">
+				<label class="custom-control custom-checkbox mb-0 align-items-center">
+					<input type="hidden" value="0" name="timer_enabled"/>
+					<input class="form-check-input custom-control-input" type="checkbox" value="1" name="timer_enabled" {{ $Page->isTimerEnabled() ? 'checked' : '' }}/>
+					<span class="custom-control-indicator"></span>
+					Nightly backup of every site at 02:30
+				</label>
+				<small class="form-text text-muted">Server time, with up to 30 minutes of random delay. Runs the same queue as Back up all sites.</small>
+			</div>
+			<div class="row">
+				<div class="form-group col-md-4">
+					<label for="parallel">Sites backed up at once</label>
+					<select class="form-control custom-select" id="parallel" name="parallel">
+						@foreach (range(1, 8) as $n)
+							<option value="{{ $n }}" {{ (int)$s['parallel'] === $n ? 'selected' : '' }}>{{ $n }}</option>
+						@endforeach
+					</select>
+				</div>
+			</div>
+			<div class="row">
+				<div class="form-group col-md-4">
+					<label for="verify_day">Weekly verification</label>
+					<select class="form-control custom-select" id="verify_day" name="verify_day">
+						@foreach (['never' => 'Never', '0' => 'Sunday', '1' => 'Monday', '2' => 'Tuesday', '3' => 'Wednesday', '4' => 'Thursday', '5' => 'Friday', '6' => 'Saturday'] as $v => $label)
+							<option value="{{ $v }}" {{ (string)$s['verify_day'] === $v ? 'selected' : '' }}>{{ $label }}</option>
+						@endforeach
+					</select>
+					<small class="form-text text-muted">Runs after that night's backups.</small>
+				</div>
+				<div class="form-group col-md-4">
+					<label for="verify_percent">File contents re-checked (%)</label>
+					<input type="number" min="0" max="100" class="form-control" id="verify_percent" name="verify_percent" value="{{ $s['verify_percent'] }}"/>
+					<small class="form-text text-muted">Downloaded and re-hashed. 100 reads the whole repository.</small>
+				</div>
+			</div>
+		</div>
+
 		<div class="tab-pane" id="ignore" role="tabpanel">
 			<p>Applied to every site on each run. Gitignore syntax, relative to the site root (<code>/var/www/...</code>, <code>/home/...</code>). Lines starting with <code>#</code> are comments.
 				Per-site additions are under <b>Manage</b> in the Sites table. Leave empty to restore the defaults.</p>
@@ -429,36 +475,6 @@
 					@endforeach
 				</select>
 				<small class="form-text text-muted">Applied on the next <code>upcp -b</code> or add-in run.</small>
-			</div>
-			<div class="form-group col-md-4 px-0">
-				<label for="parallel">Sites backed up at once</label>
-				<select class="form-control custom-select" id="parallel" name="parallel">
-					@foreach (range(1, 8) as $n)
-						<option value="{{ $n }}" {{ (int)$s['parallel'] === $n ? 'selected' : '' }}>{{ $n }}</option>
-					@endforeach
-				</select>
-				<small class="form-text text-muted">Used by Back up all sites and the nightly timer.</small>
-			</div>
-			<div class="row">
-				<div class="form-group col-md-4">
-					<label for="verify_day">Weekly verification</label>
-					<select class="form-control custom-select" id="verify_day" name="verify_day">
-						@foreach (['never' => 'Never', '0' => 'Sunday', '1' => 'Monday', '2' => 'Tuesday', '3' => 'Wednesday', '4' => 'Thursday', '5' => 'Friday', '6' => 'Saturday'] as $v => $label)
-							<option value="{{ $v }}" {{ (string)$s['verify_day'] === $v ? 'selected' : '' }}>{{ $label }}</option>
-						@endforeach
-					</select>
-					<small class="form-text text-muted">Runs after that night's backups.</small>
-				</div>
-				<div class="form-group col-md-4">
-					<label for="verify_percent">File contents re-checked (%)</label>
-					<input type="number" min="0" max="100" class="form-control" id="verify_percent" name="verify_percent" value="{{ $s['verify_percent'] }}"/>
-					<small class="form-text text-muted">Downloaded and re-hashed. 100 reads the whole repository.</small>
-				</div>
-			</div>
-			<input type="hidden" name="timer_form" value="1"/>
-			<div class="form-group custom-control custom-checkbox">
-				<input type="checkbox" class="custom-control-input" id="timer_enabled" name="timer_enabled" value="1" {{ $Page->isTimerEnabled() ? 'checked' : '' }}/>
-				<label class="custom-control-label" for="timer_enabled">Nightly backup of every site at 02:30</label>
 			</div>
 		</div>
 
