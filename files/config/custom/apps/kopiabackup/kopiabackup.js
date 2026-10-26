@@ -39,6 +39,8 @@
 			if (st.running) {
 				var since = st.started ? ' since ' + stamp(st.started, true).split(' ').pop() : '';
 				result.append(badge('info', 'running' + since));
+			} else if (st.ok === true && st.skipped) {
+				result.append(badge('warning', 'ok, ' + st.skipped + ' skipped', 'entries that could not be read; see the run log'));
 			} else if (st.ok === true) {
 				result.append(badge('success', 'ok'));
 			} else if (st.ok === 'interrupted') {

@@ -186,29 +186,59 @@ class Runner
 		];
 	}
 
+	/**
+	 * Where this site's repository lives, as recorded when it was connected or created. kopia.config
+	 * keeps working after the bucket or prefix changes on the admin page, so the recorded location is
+	 * compared with the settings on every run and a mismatch forces a reconnect to the new one.
+	 */
+	private function repoLocation(): array
+	{
+		return [
+			'endpoint' => $this->endpointHost(),
+			'region'   => (string)$this->settings['region'],
+			'bucket'   => (string)$this->settings['bucket'],
+			'prefix'   => $this->settings['prefix'] . $this->domain . '/',
+		];
+	}
+
 	private function ensureRepo(bool $create = true): void
 	{
-		if (is_file("{$this->stateDir}/kopia.config") && $this->kopia(['repository', 'status'], false)['success']) {
+		$repoFile = "{$this->stateDir}/repo.json";
+		$want = $this->repoLocation();
+		$have = is_file($repoFile) ? (array)json_decode((string)file_get_contents($repoFile), true) : [];
+		$moved = $have && array_intersect_key($have, $want) != $want;
+		if (is_file("{$this->stateDir}/kopia.config") && !$moved && $this->kopia(['repository', 'status'], false)['success']) {
 			$this->log('repository: connected');
+			if (!$have) {
+				// repositories from before locations were recorded
+				file_put_contents($repoFile, json_encode($want + ['connected' => time()], JSON_PRETTY_PRINT));
+			}
 
 			return;
 		}
 		if (!$create) {
-			throw new \RuntimeException("{$this->domain}: no repository connected; run a backup first");
+			throw new \RuntimeException($moved
+				? "{$this->domain}: storage settings changed since the repository was connected; run a backup first to reconnect"
+				: "{$this->domain}: no repository connected; run a backup first");
+		}
+		if ($moved) {
+			$this->log(sprintf('repository: storage settings changed (was %s/%s), reconnecting', $have['bucket'] ?? '?', $have['prefix'] ?? '?'));
+			@unlink("{$this->stateDir}/kopia.config");
 		}
 		$s3 = [
 			's3',
-			'--bucket', (string)$this->settings['bucket'],
-			'--endpoint', $this->endpointHost(),
-			'--region', (string)$this->settings['region'],
-			'--prefix', $this->settings['prefix'] . $this->domain . '/',
+			'--bucket', $want['bucket'],
+			'--endpoint', $want['endpoint'],
+			'--region', $want['region'],
+			'--prefix', $want['prefix'],
 			'--cache-directory', $this->cacheDir,
 			'--no-check-for-updates',
 		];
 		// a repo may already exist in the bucket (reinstall, rebuilt server): reuse it rather than fail
 		if ($this->kopia(array_merge(['repository', 'connect'], $s3), false)['success']) {
 			info('%s: connected to existing repository', $this->domain);
-			$this->log('repository: connected to existing repository at ' . $this->settings['prefix'] . $this->domain . '/');
+			$this->log('repository: connected to existing repository at ' . $want['prefix']);
+			file_put_contents($repoFile, json_encode($want + ['connected' => time()], JSON_PRETTY_PRINT));
 
 			return;
 		}
@@ -221,6 +251,11 @@ class Runner
 			'--object-splitter', 'DYNAMIC-1M-BUZHASH',
 			'--description', gethostname() . ' ' . $this->domain,
 		]));
+		file_put_contents($repoFile, json_encode($want + [
+			'lock_mode' => (string)$this->settings['lock_mode'],
+			'lock_days' => (int)$this->settings['lock_days'],
+			'created'   => time(),
+		], JSON_PRETTY_PRINT));
 		info('%s: repository created', $this->domain);
 		$this->log(sprintf('repository: created, %s lock %dd', $this->settings['lock_mode'], $this->settings['lock_days']));
 	}
@@ -390,19 +425,41 @@ class Runner
 			}
 		}
 		$out = [];
+		$failed = $skipped = 0;
 		foreach ($items as $j) {
+			$summ = $j['rootEntry']['summ'] ?? [];
 			$out[] = [
-				'id'     => $j['id'] ?? null,
-				'source' => $j['source']['path'] ?? null,
-				'size'   => $j['rootEntry']['summ']['size'] ?? null,
-				'files'  => $j['rootEntry']['summ']['files'] ?? null,
-				'failed' => $j['rootEntry']['summ']['numFailed'] ?? 0,
+				'id'      => $j['id'] ?? null,
+				'source'  => $j['source']['path'] ?? null,
+				'size'    => $summ['size'] ?? null,
+				'files'   => $summ['files'] ?? null,
+				'failed'  => (int)($summ['numFailed'] ?? 0),
+				// the policy ignores unreadable entries so one bad file cannot sink the run; they are counted, not hidden
+				'skipped' => (int)($summ['numIgnoredErrors'] ?? 0),
 			];
+			$failed += (int)($summ['numFailed'] ?? 0);
+			$skipped += (int)($summ['numIgnoredErrors'] ?? 0);
+			foreach (array_slice((array)($summ['errors'] ?? []), 0, 10) as $e) {
+				$this->log(sprintf('  skipped %s: %s', $e['path'] ?? '?', $e['error'] ?? '?'));
+			}
 		}
 		foreach ($out as $snap) {
-			$this->log(sprintf('snapshot %s: %s, %s files, %d errors (%s)', $snap['id'] ? substr($snap['id'], 0, 12) : '?', self::human((int)$snap['size']), number_format((int)$snap['files']), $snap['failed'], $snap['source']));
+			$this->log(sprintf('snapshot %s: %s, %s files, %d skipped, %d failed (%s)', $snap['id'] ? substr($snap['id'], 0, 12) : '?', self::human((int)$snap['size']), number_format((int)$snap['files']), $snap['skipped'], $snap['failed'], $snap['source']));
 		}
 		$this->log(sprintf('snapshot phase took %.1fs', $elapsed));
+		if (!$out) {
+			throw new \RuntimeException('snapshot produced no result: ' . trim((string)$ret['stderr']));
+		}
+		if (!in_array($this->shadowPath(), array_column($out, 'source'), true)) {
+			throw new \RuntimeException('snapshot of the site tree is missing');
+		}
+		if ($failed > 0) {
+			throw new \RuntimeException("snapshot has {$failed} errors; see the run log");
+		}
+		$this->report['skipped'] = $skipped;
+		if ($skipped > 0) {
+			warn('%s: %d entries could not be read and are missing from this backup', $this->domain, $skipped);
+		}
 
 		return $out;
 	}
@@ -443,8 +500,8 @@ class Runner
 		foreach ($list as $snap) {
 			$path = $snap['source']['path'] ?? '';
 			$time = strtotime($snap['startTime'] ?? '') ?: 0;
-			// snapshots from before tagging are grouped by the minute they started
-			$run = $snap['tags']['run'] ?? (string)($time - $time % 60);
+			// kopia stores --tags run:X under "tag:run"; snapshots from before tagging are grouped by the minute they started
+			$run = $snap['tags']['tag:run'] ?? $snap['tags']['run'] ?? (string)($time - $time % 60);
 			$runs[$run] ??= ['run' => $run, 'time' => $time, 'size' => 0, 'files' => 0, 'sources' => [], 'databases' => []];
 			$runs[$run]['time'] = max($runs[$run]['time'], $time);
 			if ($path === $this->shadowPath()) {
@@ -487,15 +544,18 @@ class Runner
 	}
 
 	/**
-	 * Restore part of the site tree into the site admin's home, never over the live files.
+	 * Restore files from a run.
 	 *
-	 * @param string $run     run tag from listSnapshots
-	 * @param string $subpath path inside the site, e.g. var/www/html/wp-content/uploads; empty for everything
-	 * @return string path the files were written to
-	 */
-	/**
+	 * Kopia writes into a root-owned staging directory directly under the site root, which only root can
+	 * reach, and the move into place runs chrooted into the site. A symlink the site has planted on the
+	 * destination (~/restore, wp-content/uploads, var/www itself) then resolves inside the site, never on
+	 * the host, so a compromised site cannot turn a root restore into a write anywhere else.
+	 *
+	 * @param string $run         run tag from listSnapshots
+	 * @param string $subpath     path inside the site, e.g. var/www/html/wp-content/uploads; empty for everything
 	 * @param string $where       copy: into ~/restore/<date>/<subpath>; live: back onto the site at the same paths
-	 * @param bool   $deleteExtra live only: also remove files under the path that are not in the snapshot
+	 * @param bool   $deleteExtra live only, never for the entire site: also remove files under the path that are not in the snapshot
+	 * @return string path the files were written to, as the site sees it
 	 */
 	public function restoreFiles(string $run, string $subpath, string $where = 'copy', bool $deleteExtra = false): string
 	{
@@ -506,6 +566,14 @@ class Runner
 		if (!in_array($where, ['copy', 'live'], true)) {
 			throw new \RuntimeException('where must be copy or live');
 		}
+		if ($deleteExtra && $where !== 'live') {
+			throw new \RuntimeException('removing files not in the snapshot only applies to an in-place restore');
+		}
+		if ($deleteExtra && $subpath === '') {
+			// the snapshot holds the site's own layer; the live tree also carries the read-only system layers,
+			// which --delete would treat as extras
+			throw new \RuntimeException('removing files not in the snapshot is not allowed for the entire site; pick var/www, home or a folder');
+		}
 		$snap = $this->findRun($run);
 		if (empty($snap['sources']['files'])) {
 			throw new \RuntimeException("run {$run} has no file snapshot");
@@ -514,76 +582,94 @@ class Runner
 		$this->log(sprintf('restore files from run %s (%s): %s, %s%s', $run, date('Y-m-d H:i', $snap['time']),
 			$subpath ?: '(entire site)', $where === 'live' ? 'in place' : 'copy to ~/restore', $deleteExtra ? ', removing files not in snapshot' : ''));
 
-		if ($where === 'live') {
-			$target = FILESYSTEM_VIRTBASE . "/{$this->site}/fst" . ($subpath !== '' ? "/{$subpath}" : '');
-		} else {
-			$target = $this->restoreRoot() . '/' . date('Ymd-His') . ($subpath !== '' ? "/{$subpath}" : '');
-		}
-		if (!is_dir($target) && !mkdir($target, 0750, true)) {
-			throw new \RuntimeException("cannot create {$target}");
-		}
 		$t = microtime(true);
-		$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
-		$args = ['restore', '--parallel', '16'];
-		if ($where === 'live' && $deleteExtra) {
-			$args[] = '--delete-extra';
-		}
-		$ret = $this->kopia(array_merge($args, [$source, $target]), false);
-		if (!$ret['success']) {
-			$this->log('FAILED: ' . trim($ret['stderr']));
-			throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
-		}
-		if ($where === 'live') {
-			$this->reapplyAcls($snap);
-			$this->log(sprintf('restored in place at %s in %.1fs', $this->visiblePath($target) ?: '/', microtime(true) - $t));
+		$dest = $where === 'live'
+			? '/' . $subpath
+			: '/home/' . $this->adminUser() . '/restore/' . date('Ymd-His') . ($subpath !== '' ? "/{$subpath}" : '');
 
-			return $this->visiblePath($target) ?: '/';
-		}
-		// restore writes original owners; the directories we made are root's, hand them to the site admin
-		$this->chownToAdmin($this->restoreRoot(), $target);
-		$this->log(sprintf('restored to %s in %.1fs', $this->visiblePath($target), microtime(true) - $t));
+		$this->withStaging(function (string $staging) use ($snap, $subpath, $where, $deleteExtra, $dest) {
+			$source = $snap['sources']['files'] . ($subpath !== '' ? "/{$subpath}" : '');
+			$ret = $this->kopia(['restore', '--parallel', '16', $source, $this->fst() . "{$staging}/data"], false);
+			if (!$ret['success']) {
+				$this->log('FAILED: ' . trim($ret['stderr']));
+				throw new \RuntimeException('kopia restore: ' . trim($ret['stderr']));
+			}
+			if ($where === 'copy') {
+				[$uid, $gid] = $this->adminIds();
+				// parents are made as the site admin so they belong to the admin; the restored tree keeps its owners
+				$this->inSite(['/usr/bin/mkdir', '-p', dirname($dest)], $uid, $gid);
+				$this->inSite(['/usr/bin/mv', '-T', "{$staging}/data", $dest]);
+				$this->inSite(['/usr/bin/chown', '-h', "{$uid}:{$gid}", $dest]);
 
-		return $this->visiblePath($target);
+				return;
+			}
+			$this->inSite(['/usr/bin/mkdir', '-p', $dest]);
+			$this->inSite(array_merge(
+				['/usr/bin/rsync', '-aH', '--numeric-ids'],
+				$deleteExtra ? ['--delete'] : [],
+				["{$staging}/data/", "{$dest}/"]
+			));
+			$this->reapplyAcls($snap, $subpath, $staging);
+		});
+		$this->log(sprintf('%s %s in %.1fs', $where === 'live' ? 'restored in place at' : 'restored to', $dest, microtime(true) - $t));
+
+		return $dest;
 	}
 
 	/**
-	 * Kopia restores owners and modes but not POSIX ACLs; Fortification depends on them, so put back
-	 * the ACL dump taken with that run. Its paths are absolute shadow paths, which is where the files live.
+	 * Kopia restores owners and modes but not POSIX ACLs; Fortification depends on them, so put back the
+	 * ACL dump taken with that run, limited to the restored path so nothing outside it changes. The dump
+	 * holds shadow paths; they are rewritten to in-site paths and applied chrooted like the files.
 	 */
-	private function reapplyAcls(array $snap): void
+	private function reapplyAcls(array $snap, string $subpath, string $staging): void
 	{
 		if (empty($snap['sources']['acl'])) {
 			$this->log('no ACL dump in this run; ACLs not re-applied');
 
 			return;
 		}
-		$staging = "{$this->stateDir}/restore";
-		if (!is_dir($staging)) {
-			mkdir($staging, 0700, true);
-		}
-		$file = "{$staging}/acl.txt";
-		@unlink($file);
-		$ret = $this->kopia(['restore', $snap['sources']['acl'], $file], false);
-		if (!$ret['success'] || !is_file($file)) {
+		$raw = $this->fst() . "{$staging}/acl-raw.txt";
+		$ret = $this->kopia(['restore', $snap['sources']['acl'], $raw], false);
+		if (!$ret['success'] || !is_file($raw)) {
 			$this->log('ACL dump restore FAILED: ' . trim($ret['stderr']));
 
 			return;
 		}
-		$ret = (new \Util_Process_Safe())->run('setfacl --restore=%s', $file);
-		@unlink($file);
+		$prefix = $this->shadowPath();
+		$want = '/' . $subpath;
+		$kept = [];
+		foreach (preg_split('/\n{2,}/', trim((string)file_get_contents($raw))) as $block) {
+			if (!preg_match('/^# file: (.+)$/m', $block, $m)) {
+				continue;
+			}
+			$path = str_starts_with($m[1], $prefix) ? substr($m[1], strlen($prefix)) : null;
+			if ($path === null || !($subpath === '' || $path === $want || str_starts_with($path, "{$want}/"))) {
+				continue;
+			}
+			$kept[] = substr_replace($block, '# file: ' . $path, (int)strpos($block, $m[0]), strlen($m[0]));
+		}
+		if (!$kept) {
+			$this->log('ACL dump has no entries under ' . $want);
+
+			return;
+		}
+		file_put_contents($this->fst() . "{$staging}/acl.txt", implode("\n\n", $kept) . "\n");
+		$ret = $this->inSite(['/usr/bin/setfacl', '--restore=' . "{$staging}/acl.txt"], null, null, false);
 		// entries for files that no longer exist are reported, not fatal
-		$this->log($ret['success'] ? 'ACLs re-applied' : 'ACLs re-applied with warnings: ' . trim(substr((string)$ret['stderr'], 0, 500)));
+		$this->log($ret['success'] ? count($kept) . ' ACL entries re-applied' : count($kept) . ' ACL entries re-applied with warnings: ' . trim(substr((string)$ret['stderr'], 0, 500)));
 	}
 
 	/**
 	 * Restore one database dump from a run, either into a fresh database or over the live one.
+	 * Replacing saves the live database to ~/restore/<date>/ first, then drops every table and view so
+	 * the result is the snapshot alone, not a mix with tables created since.
 	 *
 	 * @param string $mode new|replace
 	 * @return string database the data went into
 	 */
 	public function restoreDatabase(string $run, string $db, string $mode): string
 	{
-		if (!preg_match('/^[A-Za-z0-9_]+$/', $db)) {
+		if (!preg_match('/^[A-Za-z0-9_-]+$/', $db)) {
 			throw new \RuntimeException("invalid database name `{$db}'");
 		}
 		if (!in_array($mode, ['new', 'replace'], true)) {
@@ -613,32 +699,99 @@ class Runner
 		$this->log('dump restored: ' . self::human((int)filesize($file)));
 
 		$afi = \apnscpFunctionInterceptor::factory(\Auth::context(null, $this->site));
-		if ($mode === 'new') {
-			$target = $db . '_r' . date('md_Hi');
-			if (!$afi->mysql_create_database($target)) {
-				throw new \RuntimeException("could not create database {$target}");
+		try {
+			if ($mode === 'new') {
+				$target = $db . '_r' . date('md_Hi');
+				if (!$afi->mysql_create_database($target)) {
+					throw new \RuntimeException("could not create database {$target}");
+				}
+				$this->log("created database {$target}");
+			} else {
+				$target = $db;
+				if (!$afi->mysql_database_exists($target)) {
+					throw new \RuntimeException("live database {$target} no longer exists; restore into a new one instead");
+				}
+				$saved = $this->saveLiveDatabase($target);
+				$this->log("live database saved to {$saved}");
+				$this->dropAllTables($target);
+				$this->log("replacing live database {$target}");
 			}
-			$this->log("created database {$target}");
-		} else {
-			$target = $db;
-			if (!$afi->mysql_database_exists($target)) {
-				throw new \RuntimeException("live database {$target} no longer exists; restore into a new one instead");
-			}
-			$this->log("replacing live database {$target}");
-		}
 
-		$t = microtime(true);
-		$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'mysql --defaults-extra-file=%(cnf)s %(db)s < %(file)s'", [
-			'cnf' => '/root/.my.cnf', 'db' => $target, 'file' => $file,
-		]);
-		@unlink($file);
-		if (!$ret['success']) {
-			$this->log('import FAILED: ' . trim($ret['stderr']));
-			throw new \RuntimeException("mysql import into {$target}: " . trim($ret['stderr']));
+			$t = microtime(true);
+			$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'mysql --defaults-extra-file=%(cnf)s %(db)s < %(file)s'", [
+				'cnf' => '/root/.my.cnf', 'db' => $target, 'file' => $file,
+			]);
+			if (!$ret['success']) {
+				$this->log('import FAILED: ' . trim($ret['stderr']));
+				throw new \RuntimeException("mysql import into {$target}: " . trim($ret['stderr']));
+			}
+			$this->log(sprintf('imported into %s in %.1fs', $target, microtime(true) - $t));
+		} finally {
+			@unlink($file);
 		}
-		$this->log(sprintf('imported into %s in %.1fs', $target, microtime(true) - $t));
 
 		return $target;
+	}
+
+	/**
+	 * Dump the live database into ~/restore/<date>/<db>.sql before it is replaced
+	 *
+	 * @return string path as the site sees it
+	 */
+	private function saveLiveDatabase(string $db): string
+	{
+		$dest = '/home/' . $this->adminUser() . '/restore/' . date('Ymd-His');
+		$this->withStaging(function (string $staging) use ($db, $dest) {
+			$cmd = explode(' ', \Mysql_Module::EXPORT_CMD, 2);
+			array_splice($cmd, 1, 0, '--defaults-extra-file=%(cnf)s');
+			$cmd = implode(' ', $cmd) . ' --skip-dump-date -u root %(db)s > %(out)s';
+			$ret = (new \Util_Process_Safe())->run("/bin/sh -c 'set -o pipefail; {$cmd}'", [
+				'cnf' => '/root/.my.cnf', 'db' => $db, 'out' => $this->fst() . "{$staging}/{$db}.sql",
+			]);
+			if (!$ret['success']) {
+				throw new \RuntimeException("could not save the live database before replacing it: " . trim($ret['stderr']));
+			}
+			[$uid, $gid] = $this->adminIds();
+			$this->inSite(['/usr/bin/mkdir', '-p', $dest], $uid, $gid);
+			$this->inSite(['/usr/bin/mv', '-T', "{$staging}/{$db}.sql", "{$dest}/{$db}.sql"]);
+			$this->inSite(['/usr/bin/chown', '-h', "{$uid}:{$gid}", "{$dest}/{$db}.sql"]);
+			$this->inSite(['/usr/bin/chmod', '600', "{$dest}/{$db}.sql"]);
+		});
+
+		return "{$dest}/{$db}.sql";
+	}
+
+	private function dropAllTables(string $db): void
+	{
+		$ret = (new \Util_Process_Safe())->run('mysql --defaults-extra-file=%s -N -B -e %s', '/root/.my.cnf',
+			"SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = '{$db}'");
+		if (!$ret['success']) {
+			throw new \RuntimeException('could not list tables: ' . trim($ret['stderr']));
+		}
+		$tables = $views = [];
+		foreach (preg_split('/\R/', trim((string)$ret['stdout'])) as $line) {
+			if ($line === '') {
+				continue;
+			}
+			[$name, $type] = explode("\t", $line, 2) + [1 => ''];
+			$quoted = '`' . str_replace('`', '``', $name) . '`';
+			if ($type === 'VIEW') {
+				$views[] = $quoted;
+			} else {
+				$tables[] = $quoted;
+			}
+		}
+		if (!$tables && !$views) {
+			return;
+		}
+		$sql = 'SET FOREIGN_KEY_CHECKS=0;'
+			. ($views ? ' DROP VIEW IF EXISTS ' . implode(', ', $views) . ';' : '')
+			. ($tables ? ' DROP TABLE IF EXISTS ' . implode(', ', $tables) . ';' : '');
+		$ret = (new \Util_Process_Safe())->run('mysql --defaults-extra-file=%s %s -e %s', '/root/.my.cnf', $db, $sql);
+		if (!$ret['success']) {
+			throw new \RuntimeException('could not empty the live database: ' . trim($ret['stderr']));
+		}
+		$this->log(sprintf('dropped %d tables and %d views from %s', count($tables), count($views), $db));
 	}
 
 	private function findRun(string $run): array
@@ -654,7 +807,7 @@ class Runner
 	private function adminUser(): string
 	{
 		$admin = (string)(new SiteConfiguration($this->site))->getServiceValue('siteinfo', 'admin_user');
-		if ($admin === '') {
+		if ($admin === '' || !preg_match('/^[A-Za-z0-9._-]+$/', $admin)) {
 			throw new \RuntimeException("{$this->site}: no admin_user");
 		}
 
@@ -662,42 +815,62 @@ class Runner
 	}
 
 	/**
-	 * ~/restore inside the site, as the host sees it
+	 * @return array{int, int} uid and gid of the site admin; site users live in the site's own passwd,
+	 *                         so the home directory's owner is authoritative
 	 */
-	private function restoreRoot(): string
+	private function adminIds(): array
 	{
-		return FILESYSTEM_VIRTBASE . "/{$this->site}/fst/home/" . $this->adminUser() . '/restore';
-	}
-
-	/**
-	 * Host path translated to what the site owner sees over SSH/SFTP
-	 */
-	private function visiblePath(string $hostPath): string
-	{
-		$prefix = FILESYSTEM_VIRTBASE . "/{$this->site}/fst";
-
-		return str_starts_with($hostPath, $prefix) ? substr($hostPath, strlen($prefix)) : $hostPath;
-	}
-
-	private function chownToAdmin(string $root, string $leaf): void
-	{
-		// site users live in the site's own passwd, not the host's; the home directory's owner is authoritative
-		$home = dirname($root);
+		$home = $this->fst() . '/home/' . $this->adminUser();
 		$uid = (int)fileowner($home);
-		$gid = (int)filegroup($home);
 		if ($uid === 0) {
 			throw new \RuntimeException("cannot determine owner of {$home}");
 		}
-		// only the directories this restore created, not the restored content (which keeps its owners)
-		for ($dir = $leaf; str_starts_with($dir, $root); $dir = dirname($dir)) {
-			if (fileowner($dir) === 0) {
-				chown($dir, $uid);
-				chgrp($dir, $gid);
-			}
-			if ($dir === $root) {
-				break;
-			}
+
+		return [$uid, (int)filegroup($home)];
+	}
+
+	/**
+	 * The site's root as mounted on the host
+	 */
+	private function fst(): string
+	{
+		return FILESYSTEM_VIRTBASE . "/{$this->site}/fst";
+	}
+
+	/**
+	 * A root-owned scratch directory directly under the site root, handed to the callback as an in-site
+	 * path and removed afterwards. The site root itself is root's, so the site cannot replace it.
+	 */
+	private function withStaging(callable $fn): void
+	{
+		$staging = '/.kopia-restore.' . bin2hex(random_bytes(4));
+		if (!mkdir($this->fst() . $staging, 0700)) {
+			throw new \RuntimeException("cannot create staging directory in {$this->site}");
 		}
+		try {
+			$fn($staging);
+		} finally {
+			\Util_Process_Safe::exec(['rm', '-rf', '--one-file-system', $this->fst() . $staging]);
+		}
+	}
+
+	/**
+	 * Run a command chrooted into the site, as root or as the given user. Binaries and paths are in-site.
+	 */
+	private function inSite(array $cmd, ?int $uid = null, ?int $gid = null, bool $throw = true): array
+	{
+		$args = ['/usr/sbin/chroot'];
+		if ($uid !== null) {
+			$args[] = "--userspec={$uid}:{$gid}";
+		}
+		$args[] = $this->fst();
+		$ret = (new \Util_Process_Safe())->run(array_merge($args, $cmd));
+		if (!$ret['success'] && $throw) {
+			$this->log("{$cmd[0]} failed: " . trim((string)$ret['stderr']));
+			throw new \RuntimeException(basename($cmd[0]) . ' in site: ' . trim((string)$ret['stderr']));
+		}
+
+		return $ret;
 	}
 
 	private function openLog(string $kind): void

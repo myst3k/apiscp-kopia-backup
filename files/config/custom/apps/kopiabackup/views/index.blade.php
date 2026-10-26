@@ -72,6 +72,8 @@
 
 				@if ($st && $st['ok'] === false && $st['error'])
 					<div class="alert alert-danger">Last run failed: {{ $st['error'] }}</div>
+				@elseif ($st && $st['ok'] === true && $st['skipped'])
+					<div class="alert alert-warning">Last run skipped {{ $st['skipped'] }} {{ $st['skipped'] === 1 ? 'entry' : 'entries' }} it could not read; they are missing from that backup. The run log lists them.</div>
 				@endif
 
 				<h5>Status</h5>
@@ -159,7 +161,7 @@
 									<input type="hidden" value="0" name="restore_delete_extra"/>
 									<input class="form-check-input custom-control-input" type="checkbox" value="1" name="restore_delete_extra"/>
 									<span class="custom-control-indicator"></span>
-									In place only: also remove files that are not in the snapshot
+									In place only, not for the entire site: also remove files that are not in the snapshot
 								</label>
 							</div>
 							<button type="submit" name="restore_files" value="1" class="btn btn-secondary warn"
@@ -180,11 +182,11 @@
 								<label for="restore_mode">Into</label>
 								<select class="form-control custom-select" id="restore_mode" name="restore_mode">
 									<option value="new">a new database (&lt;name&gt;_r&lt;date&gt;)</option>
-									<option value="replace">the live database, replacing its tables</option>
+									<option value="replace">the live database (current copy saved to ~/restore/&lt;date&gt;/ first)</option>
 								</select>
 							</div>
 							<button type="submit" name="restore_db" value="1" class="btn btn-secondary warn"
-								data-prompt="Restore this database from the selected snapshot? If you chose the live database, its current tables are replaced."
+								data-prompt="Restore this database from the selected snapshot? If you chose the live database, a copy of it is saved to ~/restore first, then every table is replaced with the snapshot."
 								{{ $st['restoring'] || !$snapshots[0]['databases'] ? 'disabled' : '' }}>Restore database</button>
 						</div>
 					</div>
@@ -238,6 +240,8 @@
 								<td class="kb-result">
 									@if ($st['running'])
 										<span class="badge badge-info">running{{ $st['started'] ? ' since ' . date('H:i', $st['started']) : '' }}</span>
+									@elseif ($st['ok'] === true && $st['skipped'])
+										<span class="badge badge-warning" title="entries that could not be read; see the run log">ok, {{ $st['skipped'] }} skipped</span>
 									@elseif ($st['ok'] === true)
 										<span class="badge badge-success">ok</span>
 									@elseif ($st['ok'] === 'interrupted')
@@ -435,7 +439,7 @@
 					<label for="verify_day">Weekly verification</label>
 					<select class="form-control custom-select" id="verify_day" name="verify_day">
 						@foreach (['never' => 'Never', '0' => 'Sunday', '1' => 'Monday', '2' => 'Tuesday', '3' => 'Wednesday', '4' => 'Thursday', '5' => 'Friday', '6' => 'Saturday'] as $v => $label)
-							<option value="{{ $v }}" {{ (string)$s['verify_day'] === $v ? 'selected' : '' }}>{{ $label }}</option>
+							<option value="{{ $v }}" {{ (string)$s['verify_day'] === (string)$v ? 'selected' : '' }}>{{ $label }}</option>
 						@endforeach
 					</select>
 					<small class="form-text text-muted">Runs after that night's backups.</small>

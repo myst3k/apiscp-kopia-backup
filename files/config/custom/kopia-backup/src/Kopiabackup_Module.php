@@ -247,6 +247,8 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if ($missing = Settings::missing($s)) {
 			return error('missing settings: %s', implode(', ', $missing));
 		}
+		// created here, once, before any worker can race another into making its own
+		$this->master();
 		$sites = Enumerate::active();
 		$out = $this->pool($sites, 'kopiabackup:run', (int)$s['parallel']);
 		if ($failed = array_keys($out, 'failed', true)) {
@@ -500,6 +502,7 @@ class Kopiabackup_Module extends \Module_Skeleton
 				'size'      => $size,
 				'databases' => count((array)($st['databases'] ?? [])),
 				'error'     => $st['error'] ?? null,
+				'skipped'   => (int)($st['skipped'] ?? 0),
 				'verified'  => $st['verify']['finished'] ?? null,
 				'verify_ok' => $st['verify']['ok'] ?? null,
 				'verify_detail' => $st['verify'] ? [
@@ -730,11 +733,33 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if (!preg_match('/^[0-9a-f]{64}$/', $master)) {
 			return error('master must be 64 hex characters');
 		}
-		if ($this->keyring_get(self::MASTER_KEY)) {
-			return error('a master secret already exists; remove it first with cpcmd keyring:forget %s', self::MASTER_KEY);
+		$lock = $this->masterLock();
+		try {
+			if ($this->keyring_get(self::MASTER_KEY)) {
+				return error('a master secret already exists; remove it first with cpcmd keyring:forget %s', self::MASTER_KEY);
+			}
+
+			return $this->keyring_set(self::MASTER_KEY, $master);
+		} finally {
+			flock($lock, LOCK_UN);
+			fclose($lock);
+		}
+	}
+
+	/**
+	 * Keyring has no create-if-absent, so creation and import serialize on a host-wide lock
+	 */
+	private function masterLock()
+	{
+		if (!is_dir(Runner::STATE_DIR) && !mkdir(Runner::STATE_DIR, 0700, true)) {
+			throw new \RuntimeException('cannot create ' . Runner::STATE_DIR);
+		}
+		$lock = fopen(Runner::STATE_DIR . '/master.lock', 'c');
+		if (!$lock || !flock($lock, LOCK_EX)) {
+			throw new \RuntimeException('cannot lock master secret');
 		}
 
-		return $this->keyring_set(self::MASTER_KEY, $master);
+		return $lock;
 	}
 
 	/**
@@ -747,9 +772,19 @@ class Kopiabackup_Module extends \Module_Skeleton
 		if ($ref = $this->keyring_get(self::MASTER_KEY)) {
 			return (string)Keyring::decode($ref);
 		}
-		$new = bin2hex(random_bytes(32));
-		if (!$this->keyring_set(self::MASTER_KEY, $new)) {
-			throw new \RuntimeException('failed to store master secret in keyring');
+		$lock = $this->masterLock();
+		try {
+			// another process may have created it while we waited for the lock
+			if ($ref = $this->keyring_get(self::MASTER_KEY)) {
+				return (string)Keyring::decode($ref);
+			}
+			$new = bin2hex(random_bytes(32));
+			if (!$this->keyring_set(self::MASTER_KEY, $new)) {
+				throw new \RuntimeException('failed to store master secret in keyring');
+			}
+		} finally {
+			flock($lock, LOCK_UN);
+			fclose($lock);
 		}
 		warn('created master backup secret; open Recovery in the admin page and store the kit in a password manager');
 
